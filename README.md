@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
   <img src="https://img.shields.io/badge/Knowledge_Base-37_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v2026.4.23-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Version-v2026.5.7-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -81,16 +81,19 @@
 - [2026-04-17-update](changelog/2026-04-17-update.md): 641 commits (v0.10.0)，压缩 v3、Bedrock/Gemini/Ollama 新 Provider、Tool Gateway、插件命名空间技能、钉钉 QR 认证、Dashboard 插件
 - [2026-04-18-update](changelog/2026-04-18-update.md): 410 commits post-v0.10.0，Transport ABC 重构、Shell Hooks、Delegate Orchestrator、Step Plan/AI Gateway/xAI STT/KittenTTS、WeCom QR、Subagent 观测性
 - [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
+- [2026-04-30-update](changelog/2026-04-30-update.md): **v0.12.0 "The Curator Release"** —— 1,096 commits since v0.11.0、自治 Curator 最终形态、Self-improvement 循环重写、4 个新 provider（GMI / Azure Foundry / LM Studio first-class / Tencent Tokenhub）、Provider Registry（29 bundled 插件）、Gateway 平台插件化、Spotify 原生 7 工具、Google Meet、TTS Provider Registry + Piper、`hermes -z` 一次性模式、Cold-start ↓57%
+- [2026-05-07-update](changelog/2026-05-07-update.md): **v0.13.0 "The Tenacity Release"** —— 864 commits since v0.12.0、Multi-agent Kanban（SQLite/WAL/CAS/heartbeat）、`/goal` Ralph loop、`video_analyze`、xAI Custom Voices、Google Chat（第 20 个平台）、i18n 7 个 locale、Sessions auto-resume 跨重启、安全 8 P0 闭环、Checkpoints v2（单存储重写）、Post-write delta lint、Cron `no_agent` 模式
+- [2026-05-11-update](changelog/2026-05-11-update.md): 441 commits post-v0.13.0、跨 session 1h prefix cache（Claude）、`HERMES_SESSION_ID` ContextVar 暴露、`/goal` checklist+subgoal 栈 revert、sudo 加固、Kanban 安全修复（comment sanitize / iteration-budget protocol fix）、`/model` 远程 manifest Nous Portal
 
 ---
 
 ## 统计信息
 
 - **概念页面**: 37 个
-- **更新日志**: 5 个
+- **更新日志**: 8 个
 - **源码覆盖**: 关键模块逐行验证
-- **跟踪版本**: v2026.4.23
-- **最后更新**: 2026-04-29
+- **跟踪版本**: v2026.5.7（v0.13.0 + 441 post-release commits）
+- **最后更新**: 2026-05-11
 
 
 ## 使用方式

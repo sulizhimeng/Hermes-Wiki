@@ -1,7 +1,7 @@
 ---
 title: Prompt Caching 优化架构
 created: 2026-04-07
-updated: 2026-04-08
+updated: 2026-05-11
 type: concept
 tags: [architecture, module, performance, cost-optimization, anthropic]
 sources: [agent/prompt_caching.py, run_agent.py]
@@ -11,9 +11,12 @@ sources: [agent/prompt_caching.py, run_agent.py]
 
 ## 概述
 
-Prompt Caching 位于 `agent/prompt_caching.py`（2KB/72行），实现 **Anthropic `system_and_3` 缓存策略**，在多轮对话中减少约 75% 的输入 token 成本。
+Prompt Caching 位于 `agent/prompt_caching.py`，实现 **两套** Anthropic 缓存策略：
 
-核心理念：**最多 4 个 cache_control 断点 — 系统提示 + 最后 3 条非系统消息。**
+- **`system_and_3`**（默认）—— 4 个 cache_control 断点，**系统提示 + 最后 3 条非系统消息**，同一 TTL（5m 或 1h）。多轮对话减少约 75% 输入 token 成本
+- **`prefix_and_2`**（v0.13.0 后续 #23828 引入，Claude on Anthropic / OpenRouter / Nous Portal）—— 4 个断点拆**两个 TTL 层**：`tools[-1]` (1h) + 稳定 system prefix (1h) + 末 2 条非 system message (5m)。**首轮新 session 输入成本砍 ~85–90%**
+
+核心理念：**最多 4 个 cache_control 断点**。`system_and_3` 把它们全部放在末尾窗口；`prefix_and_2` 把 2 个搬到跨 session 共享的稳定前缀上，剩 2 个留给末尾滚动。
 
 ## 架构原理
 
@@ -98,6 +101,42 @@ marker = {"type": "ephemeral", "ttl": "1h"}  # 1 小时 TTL
 **使用场景**：
 - **5m（默认）**：适合快速连续对话，缓存命中率高
 - **1h**：适合长时间对话间隔，容忍更高的缓存未命中
+- **可配置**：`prompt_caching.cache_ttl: 5m | 1h`（v0.12.0 引入，bursty session 保温更划算）
+
+## `prefix_and_2` —— 跨 Session 1h 前缀缓存（v0.13.0 后续）
+
+源码（`agent/prompt_caching.py:10-22`）：
+
+> 4 breakpoints split across two TTL tiers — `tools[-1]` (1h) + stable system prefix (1h) + last 2 non-system messages (5m). The **long-lived prefix is byte-stable across sessions** for a given user config, so every fresh session reads the cached system+tools instead of re-paying for them. Within-session rolling window shrinks from 3 messages to 2 to free the breakpoint budget.
+
+### 关键设计：byte-stable prefix
+
+要让 prefix 跨 session 共享，必须**逐字节稳定**。Hermes 的做法：
+- 把不稳定的部分（memory / USER profile / 当前时间戳 / session_id）**全部移到 block[0] 之后**
+- block[0] 只放：tools schema + 系统身份 + 平台提示 + skills 索引（稳定到只有用户改 config 才会变）
+- volatile suffix 放到下一个 block，不享受 1h prefix cache，但享受 5m 滚动窗口
+
+### 调度顺序
+
+Anthropic prefix-cache 的物理顺序是 `tools → system → messages`。标记位置：
+
+```
+tools[..., tools[-1]★1h]
+ → system[block[0]★1h, block[1+]volatile]
+ → messages[..., msg[-2]★5m, msg[-1]★5m]
+```
+
+### 触发条件
+
+- provider 是 Claude（Anthropic native / OpenRouter / Nous Portal）
+- session 内有过任一轮 tool 调用（保证 tools array 非空）
+- 1h 内有相同 user config 的请求
+
+### 成本效益（实测，#23828 PR 描述）
+
+- 首轮新 session 输入成本 **↓ 85–90%**
+- Tools array (~13k tokens 默认 toolset) + 稳定 system prefix (~5–8k tokens) = ~20k tokens 走 cache_read（约正常 10%）
+- 之前 `system_and_3` 跨 session 完全冷启动，每个新 session 都全价付这 20k
 
 ## 成本效益
 
