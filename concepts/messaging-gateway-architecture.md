@@ -1,17 +1,17 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-04-29
+updated: 2026-05-14
 type: concept
 tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy]
-sources: [gateway/run.py, gateway/platforms/, hermes_cli/config.py]
+sources: [gateway/run.py, gateway/platforms/, gateway/platform_registry.py, hermes_cli/config.py, plugins/platforms/]
 ---
 
 # 消息网关架构
 
 ## 概述
 
-Gateway 是 Hermes Agent 的**统一消息网关**，支持 14+ 消息平台，从单一进程管理所有平台的连接和消息分发。
+Gateway 是 Hermes Agent 的**统一消息网关**，支持 **20+ 消息平台**（截至 v0.13.0），从单一进程管理所有平台的连接和消息分发。
 
 ## 架构
 
@@ -72,7 +72,10 @@ gateway/
 | QQ Bot | Official API v2 | WebSocket 入站(C2C/群/频道/DM) + REST 出站,语音转录(腾讯 ASR),allowlist + DM 配对 |
 | Webhook | HTTP | 外部事件接收 |
 | **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+） |
-| **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，参考实现） |
+| **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，首个参考实现） |
+| **Microsoft Teams**（插件） | Graph API | v0.12.0 引入，首个 plugin-shipped 平台 |
+| **Google Chat**（插件） | Pub/Sub + Chat REST | **第 20 个平台**（v0.13.0），Cloud Pub/Sub 入站 + per-user OAuth 附件，service account / ADC 双路径 |
+| **Line**（插件） | Line Messaging API | v0.13.0 引入 |
 
 ## 平台适配器插件化（v2026.4.23+）
 
@@ -111,11 +114,48 @@ def register(ctx):
 - 输出 Markdown 自动剥离（IRC 不支持），消息分片（IRC 长度限制）
 - 交互式 `setup` 向导（v2026.4.23+）
 
+### 当前 plugin 平台目录（v0.13.0）
+
+`plugins/platforms/` 下 4 个：
+
+| 插件 | 状态 | 入站 / 出站 |
+|------|------|-----------|
+| `irc` | v0.12 参考实现 | stdlib asyncio TLS |
+| `teams` | v0.12 引入 | Microsoft Graph API |
+| `google_chat` | v0.13 引入（第 20 个平台） | Cloud Pub/Sub pull + Chat REST + per-user OAuth 附件 |
+| `line` | v0.13 引入 | Line Messaging API |
+
+每个插件目录有 `plugin.yaml`，里面声明 `requires_env` / `optional_env` 列表（带 description / prompt / url / password 元数据），`hermes config` UI 在 platform-plugin 注入器中渲染为向导。
+
 ### 平台插件 12 个集成点全覆盖
 
 `feat: complete plugin platform parity` (2e20f6ae2) + `feat: final platform plugin parity` (e464cde58) 让插件平台和内置平台行为一致：
 - webhook 投递、PLATFORM_HINTS、`get_connected_platforms`、cron 投递、动态 toolset 生成、setup wizard 等
 - bundled 插件平台（如 IRC）启动时自动加载（`feat(plugins): bundled platform plugins auto-load by default`）
+
+### 多平台访问控制（v0.13.0）
+
+`allowed_channels` / `allowed_chats` / `allowed_rooms` 配置项扩展到 Slack、Telegram、Mattermost、Matrix、DingTalk（`#21251`）。
+
+源码验证：
+
+- `gateway/platforms/slack.py:_slack_allowed_channels()` (line 3010)
+- `gateway/platforms/mattermost.py:712` `allowed_channels` / `MATTERMOST_ALLOWED_CHANNELS`
+- `gateway/platforms/dingtalk.py:_dingtalk_allowed_chats()` (line 392)
+
+非空时充当**硬白名单**——不在表里的 channel / chat / room 收到的消息全部丢弃，不响应。
+
+### 安全：Discord role-allowlist 改为 guild-scoped（v0.13.0）
+
+`gateway/platforms/discord.py:2130` 注释直引：
+
+> Voice inputs always originate from a specific guild (guild_id is in scope). Pass it so role checks are guild-scoped and not cross-guild.
+
+修复 CVSS 8.1 的 cross-guild DM 绕过：之前 role allowlist 是 *全局* —— A guild 的角色能给 B guild 的用户开门。现在 `_is_allowed_user(user_id, guild=..., is_dm=...)` 必须传 guild 上下文（`discord.py:2134`、`2349`）。
+
+### `[[as_document]]` 媒体路由指令（v0.13.0）
+
+`gateway/platforms/base.py:2095-2119`：skill 输出里出现 `[[as_document]]` 字符串时，gateway 把所有图片附件改成**文档投递**（适用于 Signal / 部分企业平台需要保留原图细节的场景），然后从可见文本里剥离指令字符串。一次声明，覆盖该 response 中的所有图片路径。
 
 ## 平台适配器基类
 

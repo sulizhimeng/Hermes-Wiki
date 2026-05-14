@@ -1,7 +1,7 @@
 ---
 title: Hook 系统架构
 created: 2026-04-08
-updated: 2026-04-18
+updated: 2026-05-14
 type: concept
 tags: [architecture, module, extensibility, mcp, plugins]
 sources: [gateway/hooks.py, hermes_cli/plugins.py, model_tools.py, run_agent.py]
@@ -156,18 +156,41 @@ class PluginManager:
 
 #### 生命周期钩子
 
+完整 `VALID_HOOKS` 集合（`hermes_cli/plugins.py:128-168`，v0.13.0）：
+
 ```python
 VALID_HOOKS = {
-    "pre_tool_call",      # 工具调用前
-    "post_tool_call",     # 工具调用后
-    "pre_llm_call",       # LLM 调用前
-    "post_llm_call",      # LLM 调用后
-    "pre_api_request",    # API 请求前
-    "post_api_request",   # API 请求后
-    "on_session_start",   # 会话开始
-    "on_session_end",     # 会话结束
+    "pre_tool_call",            # 工具调用前；可 {"action": "block", "message": ...}
+    "post_tool_call",           # 工具调用后
+    "transform_terminal_output",# 终端输出预过滤
+    "transform_tool_result",    # 工具结果转换
+    "transform_llm_output",     # ★ v0.13.0：LLM 回复落地前最后一道；first non-None string wins
+    "pre_llm_call",             # LLM 调用前
+    "post_llm_call",            # LLM 调用后
+    "pre_api_request",          # API 请求前
+    "post_api_request",         # API 请求后
+    "on_session_start",         # 会话开始
+    "on_session_end",           # 会话结束
+    "on_session_finalize",      # finalize（落盘）
+    "on_session_reset",         # /reset
+    "subagent_stop",            # delegate / MoA 子 agent 停止
+    "pre_gateway_dispatch",     # gateway 入站 message 预处理（可 skip / rewrite / allow）
+    "pre_approval_request",     # dangerous-command approval 弹出前
+    "post_approval_response",   # approval 选择后（once/session/always/deny/timeout）
 }
 ```
+
+#### `transform_llm_output`（v0.13.0 新 hook）
+
+签名：
+
+```python
+def transform_llm_output(text: str, **ctx) -> Optional[str]:
+    """Return a string to replace the response, or None / "" to pass through.
+    First non-None string from any plugin wins."""
+```
+
+调度点：`run_agent.py:15510-15529`。异常被 catch 不破坏 turn。用途：vocabulary / personality 转换、内容过滤、context-window reducer。
 
 #### 钩子调用
 

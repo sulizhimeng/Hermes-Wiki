@@ -1,7 +1,7 @@
 ---
 title: 语音模式架构
 created: 2026-04-10
-updated: 2026-04-18
+updated: 2026-05-14
 type: concept
 tags: [voice, stt, tts, architecture]
 sources: [tools/voice_mode.py, tools/tts_tool.py, tools/transcription_tools.py, cli.py]
@@ -76,8 +76,14 @@ TTS Provider 选择和语音设置通过 `tools/tts_tool.py` 管理，支持 Ele
 | **Google Gemini TTS** | v0.10.0 新增，通过 Gemini API |
 | **xAI TTS** | v0.10.0 随 xAI Responses API 升级引入 |
 | **KittenTTS（本地）** | v2026.4.18+ 引入，本地 CPU 运行，无需 GPU 和 API key，默认模型 `KittenML/kitten-tts-nano-0.8-int8`（25MB），默认声音 `Jasper`，其他声音由 KittenTTS 包提供（25-80MB 模型范围） |
+| **Piper（本地）** | v0.12.0 新增（`#17885`），作为 native local TTS provider 通过 `tts.providers.<name>` registry 注册，closes #8508 |
+| **xAI Custom Voices** | v0.13.0 新增（`#18776`，@alt-glitch），**voice cloning** 支持 |
 
 这些 provider 也可通过 Nous Tool Gateway 统一访问（无需自备 API key）。
+
+### TTS Provider Registry（v0.12.0+）
+
+`#17843` 把 TTS provider 改成 *pluggable* —— `tts.providers.<name>` 注册表，第三方可以新增 provider 而不改 hermes 核心。Piper 是第一个 native local provider 走这套机制。
 
 ### STT Provider 扩展（v2026.4.18+）
 

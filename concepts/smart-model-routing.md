@@ -1,11 +1,13 @@
 ---
 title: Smart Model Routing 智能模型路由
 created: 2026-04-08
-updated: 2026-04-29
+updated: 2026-05-14
 type: concept
-tags: [architecture, module, model-routing, performance, caching, anthropic]
-sources: [agent/model_metadata.py, agent/models_dev.py, hermes_cli/model_switch.py, hermes_cli/model_normalize.py]
+tags: [architecture, module, model-routing, performance, caching, anthropic, provider-profile]
+sources: [agent/model_metadata.py, agent/models_dev.py, hermes_cli/model_switch.py, hermes_cli/model_normalize.py, providers/base.py, plugins/model-providers/]
 ---
+
+> v0.13.0 起，全部 30 个 provider 走 `providers/base.py:ProviderProfile` ABC + `plugins/model-providers/<name>/` 插件目录。Provider 行为是 *声明性* 的，由 transport 层读取，不再硬编码进 `model_metadata.py`。详见 [[provider-profile-plugins]]。
 
 # Smart Model Routing — 智能模型路由
 

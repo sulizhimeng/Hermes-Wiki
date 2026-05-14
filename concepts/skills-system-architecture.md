@@ -271,15 +271,27 @@ active ──不用 N 天──> stale ──继续不用──> archived
 ### CLI
 
 ```bash
-hermes curator status        # 当前状态、待处理 skill
-hermes curator run           # 立即跑一轮
-hermes curator pause/resume  # 暂停/恢复
-hermes curator pin <skill>   # 钉住某个 skill（跳过自动转换）
+hermes curator status                # 当前状态、待处理 skill；按使用量排序（v0.12.0+）
+hermes curator run                   # 立即跑一轮——v0.12.0+ 同步执行直接看结果
+hermes curator pause/resume          # 暂停/恢复
+hermes curator pin <skill>           # 钉住某个 skill（跳过自动转换）
 hermes curator unpin <skill>
-hermes curator restore <skill>  # 从归档恢复
+hermes curator restore <skill>       # 从归档恢复
+hermes curator archive <skill>       # 手动归档（v0.13.0+，#20200）
+hermes curator prune                 # 手动批量剪枝（v0.13.0+，#21216）
+hermes curator list-archived         # 列出已归档的 skill（v0.13.0+，hermes_cli/curator.py:464）
+hermes curator backup / rollback     # 快照 / 回滚（hermes_cli/curator.py:372/391）
 ```
 
 `/curator` 斜杠命令暴露相同子命令。
+
+### v0.12 → v0.13 增强
+
+- **per-run 报告**：`logs/curator/run.json` + `REPORT.md`（`#17307`）
+- **consolidated vs pruned 分类**：归档时区分整合 vs 剪枝（`#17941`）
+- **`hermes curator status` 排序**：按使用量列出 most-used / least-used skill（`#18033`、`hermes_cli/curator.py:86 by_state`）
+- **`auxiliary.curator` 配置统一**：curator 用哪个辅助模型在 `hermes model` 里选（`#17868`），不再需要 hand-edit yaml
+- **fixes**：`bump_use()` 接到 skill_invoke + preload + `skill_view`（`#17932`，原 PR #17782）；`restore_skill` 扫嵌套归档子目录（`#17951`）；status 使用真实活动时间戳而非状态（`#17953`）；seed defaults / 创建 `logs/curator/` 目录 / 延后 fire import（`#17927`）
 
 ## /reload-skills 和 /reload-mcp（v2026.4.23+）
 

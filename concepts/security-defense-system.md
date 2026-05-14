@@ -1,10 +1,10 @@
 ---
 title: 安全防御体系 — 多层注入检测
 created: 2026-04-07
-updated: 2026-04-11
+updated: 2026-05-14
 type: concept
-tags: [architecture, security, injection-defense, skills-guard]
-sources: [hermes-agent 源码分析 2026-04-07]
+tags: [architecture, security, injection-defense, skills-guard, redaction]
+sources: [agent/redact.py, gateway/platforms/discord.py, tools/approval.py, tools/file_operations.py]
 ---
 
 # 安全防御体系 — 多层注入检测
@@ -378,6 +378,53 @@ approvals:
 - `tools/tirith_security.py` — Tirith 安全策略引擎（homograph URL、pipe-to-shell、terminal 注入）
 - `tools/url_safety.py` — URL 安全检查（SSRF 防护：拦截私有网络、云元数据地址、验证重定向）
 - `tools/osv_check.py` — 依赖恶意软件扫描（OSV 数据库）
+
+## Secret Redaction（v0.13.0 默认 ON）
+
+`agent/redact.py:67`：
+
+```python
+_REDACT_ENABLED = os.getenv("HERMES_REDACT_SECRETS", "true").lower() in {"1", "true", "yes", "on"}
+```
+
+**默认 ON** —— secure default per issue #17691（注释 line 59-67）。注意这与 v0.12.0 release notes 中"flipped to OFF"的说法相反——**当前 main 是 ON**，v0.13.0 反转回 ON 是 8 个 P0 安全修复中的一项。
+
+不变量（line 60-66）：
+
+- 进程启动时一次读取，**运行期不可改**（防止恶意中间人覆盖 `HERMES_REDACT_SECRETS=false` 关掉）
+- opt-out 路径：CLI 启动时显式 flag 或 `~/.hermes/.env` 静态文件
+- 覆盖：API key 形态字符串、私钥（`_PRIVATE_KEY_RE`，line 363）、JWT 形态、敏感 env 值
+
+## Discord Role-allowlist 改为 guild-scoped（v0.13.0）
+
+`gateway/platforms/discord.py:2130`：
+
+> Voice inputs always originate from a specific guild (guild_id is in scope). Pass it so role checks are guild-scoped and not cross-guild.
+
+修复 CVSS 8.1 的 cross-guild DM 绕过。`_is_allowed_user(user_id, *, guild=..., is_dm=...)` 必须传 guild 上下文（line 2134、2349）。
+
+## Post-write delta lint（v0.13.0）
+
+`tools/file_operations.py:_check_lint_delta`（line 1192）—— `write_file` 和 `patch` 之后在工具内部跑 syntax linter，把 *新增* 错误推回 agent。
+
+两层：
+
+1. **In-process / shell linter**（微秒级）—— 捕获 corrupt write / mashed quote / truncated output 这类首要 bug class
+2. **Delta refinement**：post-write 出错时与 pre-write content 对比，把"已经存在的错误"过滤掉，只给 agent 看新引入的
+
+LSP 语义诊断通过 `_maybe_lsp_diagnostics` 走独立通道，附在 `WriteResult` / `PatchResult.lsp_diagnostics` 上，让 syntax 和 semantic 错误成为并行信号。覆盖 Python / JSON / YAML / TOML。
+
+## 其他 v0.13.0 安全修复（release notes 声明，已部分代码验证）
+
+| 修复 | 验证状态 |
+|------|---------|
+| Redaction 默认 ON | ✅ 代码验证（`agent/redact.py:67`） |
+| Discord role-allowlist guild-scoped | ✅ 代码验证（`discord.py:2130-2138`） |
+| TOCTOU 关闭 `auth.json` + MCP OAuth | release notes 声明（未深度代码验证） |
+| Browser cloud-metadata SSRF floor | release notes 声明（已有 `tools/url_safety.py` 基础） |
+| Cron prompt-injection 扫描已组装 skill 内容 | release notes 声明 |
+| `hermes debug share` 上传前 redact | release notes 声明 |
+| WhatsApp 拒绝陌生人默认 | ⚠️ 当前 `gateway/platforms/whatsapp.py:263` `dm_policy` 默认仍是 `"open"`，未在源码验证此声明
 
 ## 相关页面
 
