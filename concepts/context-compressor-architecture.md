@@ -1,7 +1,7 @@
 ---
 title: Context Compressor 上下文压缩架构
 created: 2026-04-08
-updated: 2026-04-17
+updated: 2026-05-15
 type: concept
 tags: [architecture, module, component, agent, context-compression]
 sources: [agent/context_engine.py, agent/context_compressor.py, run_agent.py, hermes_state.py, plugins/context_engine/__init__.py]
@@ -57,7 +57,7 @@ context:
     ├── Pass 2: Smart Collapse — 旧工具输出替换为信息化单行摘要
     └── Pass 3: tool_call 参数截断 — >500 字符截到 200
   Phase 2: 确定边界
-    保护头部（系统提示+首轮）+ 按 token 预算保护尾部
+    保护头部（系统提示 + protect_first_n 条非系统消息）+ 按 token 预算保护尾部
   Phase 3: LLM 结构化摘要（只处理 Phase 1 瘦身后的中间部分）
   Phase 4: 组装 + 清理孤立的 tool_call/tool_result 配对
 ```
@@ -91,7 +91,16 @@ context:
 
 ```python
 class ContextCompressor:
-    def __init__(self, model, threshold_percent=0.50):
+    def __init__(
+        self,
+        model,
+        threshold_percent=0.50,
+        protect_first_n=3,        # 头部保护：见下文
+        protect_last_n=20,
+        summary_target_ratio=0.20,
+        ...
+    ):
+        self.protect_first_n = protect_first_n
         self.context_length = get_model_context_length(model)
         self.threshold_tokens = int(self.context_length * 0.50)  # 50% 触发
         self.tail_token_budget = int(self.threshold_tokens * 0.20)  # 尾部预算
@@ -99,6 +108,29 @@ class ContextCompressor:
 ```
 
 **缩放设计**：尾部预算和摘要上限都与模型上下文窗口成比例，大窗口模型获得更丰富的摘要。
+
+### 1b. 头部保护 — `protect_first_n` 可配置（2026-05-13）
+
+之前头部保护的消息数硬编码为 3。现在 `protect_first_n` 是 `ContextCompressor.__init__` 的参数，并暴露为配置项 `compression.protect_first_n`（默认 **3**），与已有的 `protect_last_n` 模式对齐。
+
+**新语义**：`protect_first_n` 计算的是**系统提示之外**额外保护的非系统头部消息数。系统提示（若存在于 index 0）**始终隐式受保护**——它是 load-bearing 上下文，永远不会被摘要掉。`_protect_head_size()` 计算总头部大小：
+
+```python
+def _protect_head_size(self, messages) -> int:
+    head = 0
+    if messages and messages[0].get("role") == "system":
+        head = 1
+    return head + self.protect_first_n
+```
+
+| `protect_first_n` | 受保护头部 |
+|---|---|
+| 0 | 仅系统提示（无系统消息时则什么都不保护） |
+| 3（默认） | 系统提示 + 前 3 条非系统消息 |
+
+**为什么改成可配置**：依赖滚动压缩的长会话里，开头那一轮 user/assistant 交流被永久 pin 在头部，不一定符合用户希望会话被如何 framing。降到 1 只保留系统提示 + 首条非系统消息；降到 0 让整个开场交流随摘要自然老化掉。
+
+**统一两条调用路径**：新语义让 CLI 路径（消息列表含系统提示在 position 0）和 gateway 路径（gateway 的 `/compress` handler 在调用 `compress()` 前剥掉系统提示）对同一个配置值的解释一致。`ContextEngine` ABC 的 `protect_first_n` 默认值也同步为 3，使插件引擎与内置压缩器解释一致（`fix(compression): keep default protect_first_n at 3 + align ABC`）。
 
 ### 2. 工具输出修剪（三段式预处理）
 
@@ -497,7 +529,10 @@ compression:
   summary_provider: auto      # 或 openrouter, nous, custom
   summary_model: ""           # 空=自动选择
   threshold_percent: 0.50     # 50% 上下文使用时触发
+  protect_first_n: 3          # 系统提示之外额外保护的非系统头部消息数；0=仅保护系统提示
 ```
+
+> **辅助压缩模型上下文长度检测（2026-05-13 修复）**：当 `auxiliary.compression.provider` 为 `auto` 时，压缩模型复用主模型的 provider/base_url。`_check_compression_model_feasibility` 现在会把 `custom_providers` 转发给辅助压缩模型的 `get_model_context_length()` 调用，使 per-model 的 `context_length` 覆盖（如 NVIDIA NIM 上 minimax-m2.7 的 196608）对辅助模型也生效，不再回退到 models.dev 的值（`fix(auxiliary): forward custom_providers ...`）。
 
 ### 环境变量
 

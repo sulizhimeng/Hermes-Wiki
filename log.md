@@ -122,3 +122,28 @@
   - 源码: gateway/hooks.py (170行), hermes_cli/plugins.py (609行)
   - 核心内容: Gateway Hooks 事件驱动(8种事件+通配符)，Plugin System 三级来源(用户/项目/pip)，PluginContext API(工具注册/消息注入/CLI命令/钩子)，缓存友好上下文注入
 - index.md 更新为 37 页
+
+## [2026-05-15] update | 同步 hermes-agent v0.13.0（2026-04-30 ~ 2026-05-15，579 commits）
+基于 NousResearch/hermes-agent HEAD（2026-05-15）源码逐项验证：
+
+**新增 changelog:** changelog/2026-05-15-update.md
+
+**更新的概念页（16 个，均经源码验证）:**
+- web-tools-architecture — Web 后端插件化重构（tools/web_providers/ 删除，七大 plugins/web/ 插件，WebSearchProvider ABC + web_search_registry）
+- provider-transport-architecture — Codex App-Server 运行时（codex_app_server*.py），api_mode 命名修正（codex_responses）
+- smart-model-routing — xAI Grok OAuth、NovitaAI、Qwen Cloud 重命名、Nous Portal 元数据权威源、hermes proxy、NVIDIA NIM header
+- auxiliary-client-architecture — OAuth provider 辅助客户端构建器、NIM 计费 header、文件大小修正
+- context-compressor-architecture — protect_first_n 可配置（默认 3）
+- prompt-caching-optimization — 长效前缀缓存回退（#24778）、系统提示字节静态不变量、Portal Qwen TTL 限制
+- tool-registry-architecture — write_file/patch 的 LSP 语义诊断（agent/lsp/ 模块）
+- agent-loop-and-prompt-assembly — 每轮文件变更校验页脚（#24498）、GLM 工具使用强制
+- security-defense-system — 供应链咨询检查器、懒安装框架、YOLO 模式可见性
+- messaging-gateway-architecture — SimpleX/Teams 插件平台、clarify 内联按钮、Discord 历史回填、send_multiple_images
+- voice-mode-architecture — Piper 本地 TTS（10 内置 provider）、command 类型 TTS 注册表、STT 修正为 5 provider
+- skills-system-architecture — curator archive/prune 子命令、huggingface/skills 信任 tap、pinned 保护收窄为仅 delete
+- trajectory-and-data-generation — RL 基础设施移除（#26106），仅剩 SFT 数据生成
+- hook-system-architecture — 线程级工具白名单（set_thread_tool_whitelist）
+- cron-scheduling — cron 操作按名称查找
+- terminal-backends — docker_extra_args 配置项
+
+**README.md:** 版本 v0.13.0、更新日志 6 个、目录条目同步

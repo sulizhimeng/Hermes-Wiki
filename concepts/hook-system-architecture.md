@@ -1,7 +1,7 @@
 ---
 title: Hook 系统架构
 created: 2026-04-08
-updated: 2026-04-18
+updated: 2026-05-15
 type: concept
 tags: [architecture, module, extensibility, mcp, plugins]
 sources: [gateway/hooks.py, hermes_cli/plugins.py, model_tools.py, run_agent.py]
@@ -222,6 +222,10 @@ def my_pre_tool_call(tool_name, args):
 - `run_agent.py _invoke_tool`(顺序/并发两路)
 
 为避免双重触发,`handle_function_call()` 支持 `skip_pre_tool_call_hook=True`:当 `run_agent.py` 已经在外层检查过,再调 `handle_function_call` 时传这个 flag 跳过二次检查。
+
+#### 线程级工具白名单（2026-05-13）
+
+`hermes_cli/plugins.py` 新增 `set_thread_tool_whitelist` / `clear_thread_tool_whitelist`。在当前线程上设置后,`get_pre_tool_call_block_message()` 会限制只有白名单内的工具能通过,非白名单工具被一条可配置的 deny 消息阻止。这复用了 `set_approval_callback`(`tools/terminal_tool.py`)的 per-thread 模式。典型用途:`_spawn_background_review` 在运行时拒绝非 memory/非 skill 工具,同时仍继承父 agent 的完整 tools schema 以保持 prefix-cache 一致性。
 
 **典型用途**:
 - 安全 policy(阻止危险命令)

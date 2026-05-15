@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
   <img src="https://img.shields.io/badge/Knowledge_Base-37_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v2026.4.23-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Version-v0.13.0-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -37,9 +37,9 @@
 ### 工具与能力
 
 - [browser-tool-architecture](concepts/browser-tool-architecture.md): 多后端浏览器自动化，accessibility tree+三层安全防护
-- [web-tools-architecture](concepts/web-tools-architecture.md): 多后端搜索/提取/爬取，LLM 智能内容压缩
+- [web-tools-architecture](concepts/web-tools-architecture.md): 七大后端插件化搜索/提取/爬取（WebSearchProvider ABC + 注册表），LLM 智能内容压缩
 - [code-execution-sandbox](concepts/code-execution-sandbox.md): execute_code 沙箱，7 工具限制+UDS/File RPC 两种通信模式
-- [voice-mode-architecture](concepts/voice-mode-architecture.md): Push-to-talk 语音交互，STT（3 Provider）+ TTS（5 Provider，含 Gemini/xAI TTS）
+- [voice-mode-architecture](concepts/voice-mode-architecture.md): Push-to-talk 语音交互，STT（5 Provider）+ TTS（10 内置 Provider，含 Piper 本地神经 TTS）
 - [context-references](concepts/context-references.md): @file/@folder/@diff/@url/@git 引用系统，安全沙箱+注入量限制
 - [fuzzy-matching-engine](concepts/fuzzy-matching-engine.md): 8 策略链模糊匹配，从精确到相似度匹配
 - [large-tool-result-handling](concepts/large-tool-result-handling.md): 三层溢出防护（工具内截断/单结果持久化/轮次聚合预算）
@@ -65,14 +65,14 @@
 
 - [cli-architecture](concepts/cli-architecture.md): CLI 架构、斜杠命令、hermes dump
 - [terminal-backends](concepts/terminal-backends.md): 7 种终端后端（含 Vercel Sandbox）、统一 spawn-per-call 执行模型
-- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 18+ 平台统一网关（含 IRC/腾讯元宝/微信/QQ Bot），平台适配器插件化（PlatformRegistry）、代理模式、channel_prompts、角色权限
+- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 23 平台统一网关（18 内置 + 5 插件，含 SimpleX/Teams/IRC/腾讯元宝/QQ Bot），平台适配器插件化（PlatformRegistry）、代理模式、channel_prompts、角色权限
 - [gateway-session-management](concepts/gateway-session-management.md): 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
 - [hook-system-architecture](concepts/hook-system-architecture.md): 双 Hook 系统（Gateway Hooks + Plugin System），register_command/dispatch_tool，Dashboard 插件
 - [mcp-and-plugins](concepts/mcp-and-plugins.md): MCP 集成、插件钩子系统、OAuth 支持
 - [skin-engine](concepts/skin-engine.md): YAML 驱动的皮肤/主题系统
 - [worktree-isolation](concepts/worktree-isolation.md): Git Worktree 并行隔离模式
 - [cron-scheduling](concepts/cron-scheduling.md): 内置调度器、自然语言调度、多平台投递
-- [trajectory-and-data-generation](concepts/trajectory-and-data-generation.md): 轨迹保存、批量运行器、RL 训练环境
+- [trajectory-and-data-generation](concepts/trajectory-and-data-generation.md): 轨迹保存、批量运行器、SFT 数据生成（RL 基础设施已于 #26106 移除）
 
 ### 更新日志
 
@@ -81,16 +81,17 @@
 - [2026-04-17-update](changelog/2026-04-17-update.md): 641 commits (v0.10.0)，压缩 v3、Bedrock/Gemini/Ollama 新 Provider、Tool Gateway、插件命名空间技能、钉钉 QR 认证、Dashboard 插件
 - [2026-04-18-update](changelog/2026-04-18-update.md): 410 commits post-v0.10.0，Transport ABC 重构、Shell Hooks、Delegate Orchestrator、Step Plan/AI Gateway/xAI STT/KittenTTS、WeCom QR、Subagent 观测性
 - [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
+- [2026-05-15-update](changelog/2026-05-15-update.md): 579 commits (v0.13.0)，Web 后端插件化（WebSearchProvider ABC + 七大插件）、Codex App-Server 运行时、LSP 语义诊断、供应链咨询检查器 + 懒安装框架、RL 基础设施移除、xAI Grok OAuth/NovitaAI、SimpleX/Teams 平台、Piper TTS、`hermes proxy`
 
 ---
 
 ## 统计信息
 
 - **概念页面**: 37 个
-- **更新日志**: 5 个
+- **更新日志**: 6 个
 - **源码覆盖**: 关键模块逐行验证
-- **跟踪版本**: v2026.4.23
-- **最后更新**: 2026-04-29
+- **跟踪版本**: v0.13.0
+- **最后更新**: 2026-05-15
 
 
 ## 使用方式

@@ -1,7 +1,7 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-04-29
+updated: 2026-05-15
 type: concept
 tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy]
 sources: [gateway/run.py, gateway/platforms/, hermes_cli/config.py]
@@ -11,7 +11,7 @@ sources: [gateway/run.py, gateway/platforms/, hermes_cli/config.py]
 
 ## 概述
 
-Gateway 是 Hermes Agent 的**统一消息网关**，支持 14+ 消息平台，从单一进程管理所有平台的连接和消息分发。
+Gateway 是 Hermes Agent 的**统一消息网关**，支持 23 个消息平台（18 个内置 + 5 个插件平台），从单一进程管理所有平台的连接和消息分发。
 
 ## 架构
 
@@ -71,12 +71,18 @@ gateway/
 | 微信/WeChat | iLink Bot API | 长轮询收消息，AES-128-ECB 媒体加密，QR 登录 |
 | QQ Bot | Official API v2 | WebSocket 入站(C2C/群/频道/DM) + REST 出站,语音转录(腾讯 ASR),allowlist + DM 配对 |
 | Webhook | HTTP | 外部事件接收 |
-| **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+） |
+| **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+），引用回复媒体引用优先于历史回填 |
 | **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，参考实现） |
+| **Line**（插件） | Messaging API | LINE 官方 Messaging API 适配器 |
+| **Google Chat**（插件） | REST + OAuth | Google Chat 集成，OAuth 鉴权 |
+| **SimpleX Chat**（插件） | WebSocket | 隐私优先的去中心化通讯，无持久用户 ID；连接本地 simplex-chat 守护进程的 WebSocket（v2026-05-15+） |
+| **Microsoft Teams**（插件） | Bot Framework + Webhook | 个人 DM、群聊、频道帖子；Adaptive Card 审批提示（按钮原地替换），aiohttp webhook 服务（v2026-05-10+） |
 
 ## 平台适配器插件化（v2026.4.23+）
 
-`gateway/platform_registry.py` 引入 `PlatformRegistry` 单例 + `PlatformEntry` dataclass，让任何人都可以把新平台（IRC、Viber、Line 等）以**纯插件**形式接入，无需改 gateway 核心代码。
+`gateway/platform_registry.py` 引入 `PlatformRegistry` 单例 + `PlatformEntry` dataclass，让任何人都可以把新平台以**纯插件**形式接入，无需改 gateway 核心代码。
+
+当前 `plugins/platforms/` 下共有 5 个插件平台：`irc`、`line`、`google_chat`、`simplex`、`teams`。它们通过 `ctx.register_platform()` 自注册，启动时按文件系统扫描自动发现（`Platform._missing_()` 为 bundled 插件创建身份稳定的 pseudo-member）。
 
 ```python
 # 插件注册入口
@@ -308,6 +314,8 @@ hermes gateway status   # 状态
 - 话题/线程支持
 - **代理支持**（v0.10.0）：`TELEGRAM_PROXY` 环境变量或 `config.yaml` 中 `proxy_url`
 - **链接预览控制**（v0.10.0）：`config.yaml` 中 `telegram.disable_link_preview` 关闭消息链接预览
+- **clarify 内联键盘按钮**（#24199，v2026-05-15+）：gateway 模式下 clarify 工具通过 Telegram inline keyboard 按钮呈现选项。`gateway/run.py` 现在向 `AIAgent` 传入 `clarify_callback`；`tools/clarify_gateway.py` 是事件驱动原语（register/wait_for_response/resolve_gateway_clarify，per-session FIFO + `threading.Event` 阻塞）。`gateway/platforms/base.py` 提供带编号文本兜底的抽象 `send_clarify`，所有适配器（Discord、Slack、WhatsApp、Signal、Matrix 等）开箱可用
+- **原生 draft 流式**（Bot API 9.5+，v2026-05-10+）：通过 `sendMessageDraft` 实现 DM 回复的流式草稿，token 到达时平滑动画预览，替代旧的 `editMessageText` 轮询路径
 
 ### Discord
 - 支持服务器和私聊
@@ -318,6 +326,9 @@ hermes gateway status   # 状态
 - **角色权限控制**（v0.10.0）：`DISCORD_ALLOWED_ROLES` 环境变量，逗号分隔 Role ID。与 `DISCORD_ALLOWED_USERS` 是 OR 关系——用户 ID 或角色任一匹配即放行，两个都没配则所有人可用
 - **channel_prompts**（v0.10.0）：按频道/话题注入不同的系统提示，也扩展到 Telegram（群组/论坛话题）、Slack、Mattermost
 - **@everyone 和角色 ping 屏蔽**：`allowed_mentions` 默认阻止 bot 触发全体通知
+- **频道历史回填**（v2026-05-15+）：require_mention 门控造成的会话记录缺口由 channel history backfill 补齐，默认开启，覆盖共享会话频道、per-user 会话和 threads
+- **thread_require_mention**（v2026-05-15+）：默认情况下 Hermes 一旦参与某 Discord thread 即自动响应该 thread 后续每条消息；该选项要求多 bot 共存的 thread 中仍需 @mention 触发
+- **clarify choices 渲染为按钮**（v2026-05-15+）：clarify 工具带 choices 时，`DiscordAdapter` 覆盖 `send_clarify` 附加按钮视图（每个选项一个 `discord.ui.Button`，上限 24，外加 "Other (type answer)" 按钮），与 Telegram 的交互式 clarify 体验对齐
 
 ### 钉钉 DingTalk
 - Stream 协议连接
@@ -360,11 +371,16 @@ hermes gateway status   # 状态
 - **全局隧道/代理场景 URL 开关**：`security.allow_private_urls` / `HERMES_ALLOW_PRIVATE_URLS` 允许解析私有 IP 范围（198.18.0.0/15、100.64.0.0/10），解决 OpenWrt / TUN 代理（Clash/Mihomo/Sing-box）/ 企业 VPN / Tailscale 场景。云元数据端点（169.254.169.254 等）始终阻断
 - **平台 hints**：`PLATFORM_HINTS` 覆盖 Matrix、Mattermost、Feishu 的系统提示
 
+### v2026-05-15+ 增强
+
+- **原生 send_multiple_images**：Telegram、Discord、Slack、Mattermost、Email 实现原生多附件发送 ABC——图片作为单条捆绑消息到达而非 N 条独立消息（Telegram `send_media_group` 每相册 10 张、Discord `channel.send(files=[...])` 每条 10 个附件、Slack `files_upload_v2`、Mattermost 每帖 5 个附件上限）；Signal 也支持多图
+- **集中式音频路由 + FLAC 支持**（#17833）：`gateway/platforms/base.py` 新增 `should_send_media_as_audio(platform, ext, is_voice)` 作为音频路由唯一来源；`.flac` 加入识别的音频扩展名；Telegram `send_voice()` 对 Bot API 无法原生播放的格式（`.wav`、`.flac` 等）回退到 `send_document`
+
 ### 与其他 Agent 框架对比
 
 | 特性 | Hermes | OpenClaw | Claude |
 |------|--------|----------|--------|
-| 平台数量 | 14+ | 14+ | 1 |
+| 平台数量 | 23（18 内置 + 5 插件） | 14+ | 1 |
 | 统一网关 | 单一进程 | 支持 | N/A |
 | 会话共享 | 跨平台 | 支持 | N/A |
 | 语音转录 | Telegram/Discord | 支持 | N/A |

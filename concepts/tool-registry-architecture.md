@@ -1,10 +1,10 @@
 ---
 title: Tool Registry 工具注册系统架构
 created: 2026-04-08
-updated: 2026-04-15
+updated: 2026-05-15
 type: concept
-tags: [tool, toolset, tool-registry, architecture, component]
-sources: [tools/registry.py, model_tools.py]
+tags: [tool, toolset, tool-registry, architecture, component, lsp]
+sources: [tools/registry.py, model_tools.py, 2026-05-15 增量验证]
 ---
 
 # Tool Registry — 工具注册系统架构
@@ -218,6 +218,55 @@ print(registry.check_toolset_requirements())
 # 输出: {'terminal': True, 'web': False, 'browser': True, ...}
 ```
 
+## write_file / patch 的 LSP 语义诊断（2026-05-15）
+
+`write_file` 与 `patch` 的写后检查不再只做语法检查，现在会接入**真实语言
+服务器**返回语义诊断（类型错误、未定义名、缺失导入、项目级语义问题）
+（commit `83b9389`，#24168）。
+
+### 分层写后检查
+
+写后检查在 `tools/file_operations.py` 中是分层的：
+
+1. **进程内语法检查**（微秒级）—— `_check_lint_delta()`，优先执行。
+2. **LSP 语义诊断**（第三层）—— 仅当语法干净时才运行。
+
+诊断会针对写入开始时捕获的**基线 delta-filter**，因此模型只看到自己的
+编辑引入的错误。`fix(lsp)`（commit `1907152`，#25978）把基线诊断
+**重映射到编辑后坐标系** —— 编辑点下方的既有诊断会因行数变化而位移，
+LSP 层用 pre/post 内容构建行位移映射来对齐。
+
+### Git 工作区门控
+
+LSP 仅在检测到 git 工作区时启用：当 Agent 的 cwd 或被编辑文件位于
+git worktree 内时，LSP 针对该工作区运行；否则只保留进程内语法检查这一层。
+这避免在用户 home 目录 cwd（Telegram/Discord gateway 聊天）下启动守护进程。
+任何 LSP 失败路径都静默回退到纯语法结果 —— 缺失或不稳定的语言服务器
+永远不会破坏一次写入。
+
+### agent/lsp/ 模块
+
+新模块 `agent/lsp/` 拆分为：
+
+| 文件 | 职责 |
+|---|---|
+| `protocol.py` | Content-Length JSON-RPC 帧封装 + 信封助手 |
+| `client.py` | 异步 `LSPClient`（spawn、initialize、didOpen/didChange、ContentModified 重试、push/pull 诊断存储） |
+| `workspace.py` | git worktree 向上遍历 + 每服务器的 NearestRoot 解析器 |
+| `servers.py` | 26 个语言服务器注册表（扩展名匹配、root 解析、spawn 构建） |
+| `install.py` | 自动安装分发（npm/go/pip 安装到 `HERMES_HOME/lsp/bin/`） |
+| `manager.py` | `LSPService`（按 (server_id, root) 的 client 注册表、惰性 spawn、broken-set、in-flight 去重、面向工具层的同步门面） |
+| `reporter.py` | `<diagnostics>` 块格式化（仅 severity-1，每文件 20 条） |
+| `range_shift.py` | 基线诊断坐标重映射 |
+| `cli.py` | `hermes lsp {status,list,install,install-all,restart,which}` |
+
+约 26 个语言服务器（pyright、gopls、rust-analyzer、
+typescript-language-server、clangd、bash-language-server 等）已接入。
+
+**配置**：`DEFAULT_CONFIG` 的 `lsp` 段 —— `enabled`（默认 true）、
+`wait_mode`、`wait_timeout`、`install_strategy`（默认 `auto`）以及每服务器
+覆盖（`disabled`、`command`、`env`、`initialization_options`）。
+
 ## 与其他系统的关系
 
 - [[toolsets-system]] — Registry 按 toolset 组织工具
@@ -226,3 +275,11 @@ print(registry.check_toolset_requirements())
 - [[large-tool-result-handling]] — 调度结果经过统一错误格式处理
 - [[fuzzy-matching-engine]] — patch 工具使用的 8 层模糊匹配引擎
 - [[code-execution-sandbox]] — execute_code 沙箱工具
+- [[agent-loop-and-prompt-assembly]] — 每轮文件变更校验页脚（write_file/patch 失败检测）
+
+## 相关文件
+
+- `tools/registry.py` — Tool Registry 中央骨架
+- `model_tools.py` — 工具发现与路由
+- `tools/file_operations.py` — write_file/patch + 分层写后检查
+- `agent/lsp/` — LSP 语义诊断模块（protocol/client/workspace/servers/install/manager/reporter/range_shift/cli）

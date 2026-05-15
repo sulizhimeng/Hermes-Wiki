@@ -1,7 +1,7 @@
 ---
 title: Cron 调度与自动化工作流
 created: 2026-04-07
-updated: 2026-04-07
+updated: 2026-05-15
 type: concept
 tags: [architecture, cron, automation, scheduling]
 sources: [hermes-agent 源码分析 2026-04-07]
@@ -41,6 +41,10 @@ def cronjob(
     elif action == "remove":
         return _remove_job(job_id)
 ```
+
+### 按名称查找任务（2026-05-15）
+
+`run`/`pause`/`resume`/`remove` 操作及 `hermes cron edit` 不再强制要求 hex ID——也接受**任务名称**（大小写不敏感）。当多个任务重名时，操作会拒绝执行并列出所有匹配任务（id、name、schedule、next_run_at），由调用方挑选具体 ID。`cron/jobs.py` 的 `get_job()` 保持 ID-only 语义（供 web_server/api_server/curator/scheduler 等调用点使用），名称解析在 CLI 层完成。
 
 ## 调度器
 

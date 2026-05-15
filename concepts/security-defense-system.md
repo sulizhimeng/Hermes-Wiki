@@ -1,10 +1,10 @@
 ---
 title: 安全防御体系 — 多层注入检测
 created: 2026-04-07
-updated: 2026-04-11
+updated: 2026-05-15
 type: concept
-tags: [architecture, security, injection-defense, skills-guard]
-sources: [hermes-agent 源码分析 2026-04-07]
+tags: [architecture, security, injection-defense, skills-guard, supply-chain]
+sources: [hermes-agent 源码分析 2026-04-07, 2026-05-15 增量验证]
 ---
 
 # 安全防御体系 — 多层注入检测
@@ -373,11 +373,74 @@ approvals:
 
 审批状态按 session 隔离（`contextvars.ContextVar`），gateway 多用户并发时互不影响。"session" 级别的允许只在当前会话有效，不跨 session。
 
+## 供应链咨询检查器（hermes_cli/security_advisories.py，2026-05-12）
+
+针对 PyPI 上单包被投毒的攻击（如 2026-05-12 命中 `mistralai==2.4.6` 的
+Mini Shai-Hulud 蠕虫），Hermes 新增了运行时**供应链咨询检查器**，为已经
+中招的用户提供检测与修复指引。
+
+### ADVISORIES 目录
+
+```python
+@dataclass(frozen=True)
+class Advisory:
+    advisory_id: str          # 如 "shai-hulud-2026-05"
+    package: str              # 如 "mistralai"
+    bad_versions: ...         # 受影响版本（如 "2.4.6"）
+    # 标题、说明、修复步骤等
+
+ADVISORIES: tuple[Advisory, ...] = (...)   # 目前 1 条
+```
+
+新增一条咨询只需添加一个 `Advisory` dataclass 条目。
+
+### 检测与提示流程
+
+- `detect_compromised()` 用 `importlib.metadata.version()` 检查本机已装版本
+  —— 不依赖 pip，可在缺少 pip 的 uv venv 中工作。
+- Banner 缓存（`~/.hermes/cache/advisory_banner_seen`）将启动横幅限制为
+  每条咨询每 24 小时一次。
+- 用户确认（ack）持久化到 `config.yaml` 的 `security.acked_advisories`，
+  确认后不再重复提示。
+- 接入点：`hermes doctor`（首先运行，打印完整修复块）、
+  `hermes doctor --ack <id>`（消除某条咨询）、`cli.py` 交互/单查询分支
+  （stderr 短横幅指向 `hermes doctor`）、`gateway/run.py` 启动
+  （在 `gateway.log` 中输出运维可见的警告）。
+
+## 懒安装框架与分层安装回退（tools/lazy_deps.py）
+
+为减小基础安装体积并降低供应链暴露面，opt-in 后端改为**首次使用时按需
+安装**，而非安装时全量拉取。
+
+- `LAZY_DEPS` 白名单将带命名空间的功能键（如 `tts.elevenlabs`、
+  `memory.honcho`、`provider.bedrock`）映射到 pip spec。
+- `ensure(feature)` 通过 `uv → pip → ensurepip` 阶梯在当前 venv 中安装
+  缺失依赖。
+- 严格的 spec 安全正则会拒绝 URL、文件路径、shell 元字符、pip 标志注入、
+  控制字符 —— 只接受按名称引用的 PyPI 包。
+- 受 `security.allow_lazy_installs` 开关控制（默认 true）。
+- **分层安装回退**：一个被隔离/撤回的 PyPI 包不再静默把全新安装降级为
+  "仅核心"，安装器会保留其它所有 extra 并告知用户最终落到了哪一层。
+
+配套的依赖锁定策略（commit `04b1fda`）：为 5 个未锁定的宽松依赖添加了
+版本上界，并在文档中记录了供应链策略（精确 pin + `uv.lock` + 哈希校验
+安装路径 + CI 的 `uv lock --check` 漂移门禁）。
+
 ## 额外安全层
 
 - `tools/tirith_security.py` — Tirith 安全策略引擎（homograph URL、pipe-to-shell、terminal 注入）
 - `tools/url_safety.py` — URL 安全检查（SSRF 防护：拦截私有网络、云元数据地址、验证重定向）
 - `tools/osv_check.py` — 依赖恶意软件扫描（OSV 数据库）
+
+## YOLO 模式可见性（2026-05-15）
+
+`--yolo` 模式会绕过所有危险命令审批。为避免用户忘记自己处于此状态，
+CLI 现在显式展示该状态（commit `b6e0741`）：
+
+- **Banner**：仅在 YOLO 激活时以红色显示
+  `⚠ YOLO mode — all approval prompts bypassed` 一行；默认情况静默。
+- **状态栏**：在三种宽度档（<52、<76、≥76）的纯文本回退与 fragments
+  构建器中都追加红色 `⚠ YOLO` 片段。
 
 ## 相关页面
 
@@ -395,3 +458,6 @@ approvals:
 - `tools/tirith_security.py` — Tirith 安全策略
 - `tools/url_safety.py` — SSRF 防护
 - `tools/osv_check.py` — 恶意软件扫描
+- `hermes_cli/security_advisories.py` — 供应链咨询检查器（451 行）
+- `tools/lazy_deps.py` — 懒安装框架与白名单（608 行）
+- `hermes_cli/banner.py` — YOLO 模式横幅警告

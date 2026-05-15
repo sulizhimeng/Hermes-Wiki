@@ -1,10 +1,10 @@
 ---
 title: 轨迹保存与训练数据生成
 created: 2026-04-07
-updated: 2026-04-14
+updated: 2026-05-15
 type: concept
 tags: [architecture, data-generation, training, trajectory, batch-runner]
-sources: [agent/trajectory.py, batch_runner.py, toolset_distributions.py, environments/, run_agent.py]
+sources: [agent/trajectory.py, batch_runner.py, toolset_distributions.py, run_agent.py]
 ---
 
 # 轨迹保存与训练数据生成
@@ -20,10 +20,10 @@ AIAgent 真实执行每个任务
     ↓ save_trajectories=True
 对话轨迹格式转换（ShareGPT 格式）
     ↓ trajectory.py
-JSONL 训练数据
-    ↓ environments/ + Atropos
-RL 强化学习训练
+JSONL 训练数据（SFT）
 ```
+
+> **重要变更（2026-05-15）**：仓库在 commit `5af672c`（"chore: remove Atropos RL environments and tinker-atropos integration"，#26106）中**彻底移除了 RL 强化学习相关基础设施**。被删除的内容包括：整个 `environments/` 目录（43 个文件，含 `hermes_base_env.py`、`agent_loop.py`、各类 `tool_call_parsers/`、benchmark 环境）、`rl_cli.py`、`tools/rl_training_tool.py`（全部 10 个 `rl_*` 工具）、`tinker-atropos` git submodule，以及 `pyproject.toml` 中的 `rl` / `yc-bench` extras。因此本系统**当前只剩 SFT 数据生成**（轨迹保存 + 批量运行器），不再包含 RL 训练环境。
 
 ## 什么场景会用到
 
@@ -32,14 +32,23 @@ RL 强化学习训练
 | **Nous Research 内部** | 批量生成工具调用训练数据，迭代 Hermes 系列模型 |
 | **模型微调** | 想训练自己的工具调用模型时，用 batch_runner 生成高质量 SFT 数据 |
 | **单次调试** | `--save_trajectories` 保存单次对话轨迹，方便分析 Agent 行为 |
-| **RL 训练** | 通过 environments/ 接入 Atropos 框架做强化学习 |
 | **日常使用** | 默认关闭（`save_trajectories=False`），不影响正常对话 |
+
+> RL 强化学习环境曾通过 `environments/` 接入 Tinker-Atropos 框架，但该路径已在 #26106 中删除，不再可用。
 
 ## 轨迹保存（trajectory.py）
 
 当 `save_trajectories=True` 时，每次对话结束后自动保存。
 
-**触发位置**：`run_agent.py` 的 `_save_trajectory()` 方法（line 2358），在 `run_conversation()` 结束时调用。
+`agent/trajectory.py`（56 行）只保留**静态辅助函数和文件写入逻辑**：
+
+- `convert_scratchpad_to_think()` — 把 `<REASONING_SCRATCHPAD>` 标签转成 `<think>`
+- `has_incomplete_scratchpad()` — 检测未闭合的 scratchpad 标签
+- `save_trajectory()` — 把一条 ShareGPT 格式轨迹追加写入 JSONL 文件
+
+格式转换的主逻辑 `_convert_to_trajectory_format()` 仍保留为 `AIAgent` 的方法（因为 `batch_runner.py` 直接调用 `agent._convert_to_trajectory_format()`）。
+
+**触发位置**：`run_agent.py` 的 `_save_trajectory()` 方法（`run_agent.py:4954`），在 `run_conversation()` 结束时调用（`run_agent.py:15552`），内部委托给 `trajectory.save_trajectory()`。
 
 **输出格式**：ShareGPT 格式的 JSONL，每条记录包含：
 
@@ -52,7 +61,7 @@ RL 强化学习训练
     {"from": "tool", "value": "<tool_response>\n{...}\n</tool_response>"},
     {"from": "gpt", "value": "<think>\n...\n</think>\n最终回答"}
   ],
-  "timestamp": "2026-04-14T...",
+  "timestamp": "2026-05-15T...",
   "model": "qwen3.6-plus",
   "completed": true
 }
@@ -64,7 +73,7 @@ RL 强化学习训练
 
 ### 格式转换细节
 
-`_convert_to_trajectory_format()`（`run_agent.py:2193`）负责将内部 OpenAI 格式转为训练格式：
+`_convert_to_trajectory_format()`（`run_agent.py:4785`）负责将内部 OpenAI 格式转为训练格式：
 
 | 转换规则 | 说明 |
 |----------|------|
@@ -78,7 +87,7 @@ RL 强化学习训练
 
 ## Batch Runner（batch_runner.py）
 
-规模化数据生成的核心组件，1287 行。
+规模化数据生成的核心组件，1302 行。
 
 **使用方式**：
 
@@ -106,7 +115,7 @@ python batch_runner.py --dataset_file=data.jsonl --batch_size=10 --run_name=my_r
 
 ### 工具集分布（toolset_distributions.py）
 
-控制数据生成时启用哪些工具组合及其出现概率：
+控制数据生成时启用哪些工具组合及其出现概率（364 行）：
 
 ```python
 DISTRIBUTIONS = {
@@ -130,20 +139,6 @@ run_browser_tasks.sh           # 浏览器任务批量脚本
 example_browser_tasks.jsonl    # 浏览器任务数据集示例
 ```
 
-## RL 训练环境（environments/）
-
-与 Tinker-Atropos 框架集成的强化学习环境：
-
-| 环境 | 用途 |
-|------|------|
-| `hermes_base_env.py` | 基础 Agent 环境 |
-| `agentic_opd_env.py` | Agentic 交互环境 |
-| `web_research_env.py` | Web 研究任务环境 |
-| `terminal_test_env/` | 终端命令测试环境 |
-| `hermes_swe_env/` | 软件工程任务环境 |
-| `tool_call_parsers/` | 工具调用解析器 |
-| `agent_loop.py` | Agent 循环与环境的桥接 |
-
 ## 普通用户需要关心吗
 
 **一般不需要**。这套系统默认全部关闭，日常聊天完全不受影响。
@@ -166,9 +161,9 @@ python batch_runner.py --dataset_file=your_tasks.jsonl --batch_size=10 --run_nam
 
 ## 相关文件
 
-- `agent/trajectory.py` — 轨迹文件写入和格式转换工具函数
-- `run_agent.py:2193-2371` — `_convert_to_trajectory_format()` + `_save_trajectory()`
-- `batch_runner.py` — 批量运行器（1287 行）
-- `toolset_distributions.py` — 工具集概率分布定义
-- `environments/` — RL 训练环境
+- `agent/trajectory.py` — 轨迹文件写入和静态辅助函数（56 行）
+- `run_agent.py:4785` — `_convert_to_trajectory_format()`
+- `run_agent.py:4954` — `_save_trajectory()`
+- `batch_runner.py` — 批量运行器（1302 行）
+- `toolset_distributions.py` — 工具集概率分布定义（364 行）
 - `datagen-config-examples/` — 数据生成配置示例

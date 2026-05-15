@@ -1,10 +1,10 @@
 ---
 title: Provider Transport 架构
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-05-15
 type: concept
 tags: [architecture, module, provider, transport, api-dispatch]
-sources: [agent/transports/base.py, agent/transports/anthropic.py, agent/transports/chat_completions.py, agent/transports/bedrock.py, agent/transports/codex.py, agent/transports/types.py, agent/transports/__init__.py, run_agent.py]
+sources: [agent/transports/base.py, agent/transports/anthropic.py, agent/transports/chat_completions.py, agent/transports/bedrock.py, agent/transports/codex.py, agent/transports/codex_app_server.py, agent/transports/types.py, agent/transports/__init__.py, run_agent.py]
 ---
 
 # Provider Transport — API 路径统一抽象
@@ -57,12 +57,14 @@ class ProviderTransport(ABC):
 
 | Transport | 文件 | 行数 | api_mode | 覆盖 |
 |-----------|------|------|----------|------|
-| `AnthropicTransport` | `transports/anthropic.py` | 177 | `anthropic_messages` | Claude（直连、Nous Portal） |
-| `ChatCompletionsTransport` | `transports/chat_completions.py` | 387 | `chat_completions`、`openai` 等 | OpenAI、OpenRouter、Gemini、xAI、custom OpenAI 兼容 |
-| `ResponsesApiTransport` | `transports/codex.py` | 217 | `openai_responses` | OpenAI Codex、Responses API |
+| `AnthropicTransport` | `transports/anthropic.py` | 179 | `anthropic_messages` | Claude（直连、Nous Portal） |
+| `ChatCompletionsTransport` | `transports/chat_completions.py` | 614 | `chat_completions` | OpenAI、OpenRouter、Gemini、xAI、custom OpenAI 兼容 |
+| `ResponsesApiTransport` | `transports/codex.py` | 270 | `codex_responses` | OpenAI Codex、xAI Grok OAuth（Responses API） |
 | `BedrockTransport` | `transports/bedrock.py` | 154 | `bedrock_converse` | AWS Bedrock（Converse API） |
-| `NormalizedResponse` | `transports/types.py` | 142 | — | 共享响应类型 |
-| 基类 + 注册表 | `transports/base.py` + `__init__.py` | 89 + 51 | — | ABC + `get_transport()` 惰性发现 |
+| `NormalizedResponse` | `transports/types.py` | 162 | — | 共享响应类型 |
+| 基类 + 注册表 | `transports/base.py` + `__init__.py` | 89 + 68 | — | ABC + `get_transport()` 惰性发现 |
+
+> **api_mode 命名**：注册表实际注册的字符串是 `anthropic_messages`、`chat_completions`、`codex_responses`、`bedrock_converse`（见各 transport 模块尾部的 `register_transport(...)` 调用）。OpenAI Responses API 走的 api_mode 是 `codex_responses`。
 
 ### 注册表：惰性发现
 
@@ -78,6 +80,23 @@ def register_transport(api_mode: str, transport_cls: type) -> None:
 ```
 
 首次 `get_transport("anthropic_messages")` 调用时才 import `transports/anthropic.py`——**延迟到实际使用**，启动不会因为 import 一堆 SDK 而变慢。
+
+## Codex App-Server 运行时（可选 opt-in，#24182）
+
+除上述四个标准 transport，Hermes 还提供一个**可选的替代运行时**：把 OpenAI/Codex 模型的每个回合交给一个 `codex app-server` 子进程处理，而非走 Hermes 自己的工具派发循环。**默认行为不变。**
+
+| 模块 | 文件 | 行数 | 职责 |
+|------|------|------|------|
+| App-Server 客户端 | `transports/codex_app_server.py` | 368 | stdio 上的 newline-delimited JSON-RPC 2.0 speaker：spawn `codex app-server`、init 握手、请求/响应、通知队列、服务端发起的请求队列（审批往返）、可中断阻塞读 |
+| 会话适配器 | `transports/codex_app_server_session.py` | 810 | `CodexAppServerSession`——每个 `AIAgent` 实例一个惰性会话 |
+| 事件投影器 | `transports/codex_event_projector.py` | 312 | 把 codex 的 `item/*` 通知转回 Hermes 标准 `{role, content, tool_calls, tool_call_id}` 消息形状，使记忆/技能 review 仍可工作 |
+
+启用方式：
+- `_VALID_API_MODES` 新增 `codex_app_server`（`hermes_cli/runtime_provider.py`）
+- `_maybe_apply_codex_app_server_runtime()` 在 `_resolve_runtime_from_pool_entry()` 末尾调用——**仅当** config.yaml 中 `model.openai_runtime: codex_app_server` **且** provider 属于 `{openai, openai-codex}` 时才把 api_mode 改写为 `codex_app_server`。其他 provider（anthropic、openrouter 等）不会被重路由
+- `AIAgent.run_conversation()` 在 `self.api_mode == "codex_app_server"` 时调用 `_run_codex_app_server_turn()`，委托给 `CodexAppServerSession`
+
+注意 `codex_app_server` 并非通过标准 `register_transport()` 注册的 transport——它是一条独立的运行时路径，由 `AIAgent` 直接分支，与四个标准 transport 平级但走子进程协议。
 
 ## 在 run_agent.py 中的接入点
 
@@ -124,8 +143,9 @@ def register_transport(api_mode: str, transport_cls: type) -> None:
 |----------|---------------|------|
 | Anthropic | AnthropicTransport（委托 `anthropic_adapter.py`） | 全路径完成 |
 | Chat Completions（OpenAI 兼容） | ChatCompletionsTransport | 全路径完成 |
-| OpenAI Responses API（Codex） | ResponsesApiTransport | 全路径完成 |
+| OpenAI Responses API（Codex、xAI Grok OAuth） | ResponsesApiTransport（`codex_responses`） | 全路径完成 |
 | AWS Bedrock | BedrockTransport | 全路径完成 |
+| Codex App-Server 运行时 | `CodexAppServerSession`（独立路径，opt-in） | 子进程运行时，默认关闭 |
 | Auxiliary Client（压缩/记忆） | 已迁移到 Transport | 完成 |
 
 ## 与其他系统的关系
@@ -138,11 +158,14 @@ def register_transport(api_mode: str, transport_cls: type) -> None:
 ## 相关文件
 
 - `agent/transports/base.py`（89 行） — `ProviderTransport` ABC
-- `agent/transports/types.py`（142 行） — `NormalizedResponse` 共享类型
-- `agent/transports/__init__.py`（51 行） — 注册表 + 惰性发现
-- `agent/transports/anthropic.py`（177 行） — Anthropic Messages
-- `agent/transports/chat_completions.py`（387 行） — Chat Completions
-- `agent/transports/codex.py`（217 行） — OpenAI Responses API
+- `agent/transports/types.py`（162 行） — `NormalizedResponse` 共享类型
+- `agent/transports/__init__.py`（68 行） — 注册表 + 惰性发现
+- `agent/transports/anthropic.py`（179 行） — Anthropic Messages
+- `agent/transports/chat_completions.py`（614 行） — Chat Completions
+- `agent/transports/codex.py`（270 行） — OpenAI Responses API（`codex_responses`）
 - `agent/transports/bedrock.py`（154 行） — AWS Bedrock Converse
+- `agent/transports/codex_app_server.py`（368 行） — Codex app-server JSON-RPC 客户端
+- `agent/transports/codex_app_server_session.py`（810 行） — Codex 运行时会话适配器
+- `agent/transports/codex_event_projector.py`（312 行） — Codex item → Hermes 消息投影
 - `run_agent.py` — 10+ 接入点
 - `agent/auxiliary_client.py` — 辅助路径已迁移

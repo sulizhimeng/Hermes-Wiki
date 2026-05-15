@@ -1,7 +1,7 @@
 ---
 title: Auxiliary Client 辅助客户端架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-15
 type: concept
 tags: [architecture, module, component, agent, tool]
 sources: [agent/auxiliary_client.py]
@@ -11,7 +11,7 @@ sources: [agent/auxiliary_client.py]
 
 ## 概述
 
-Auxiliary Client 位于 `agent/auxiliary_client.py`（85KB/2127行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
+Auxiliary Client 位于 `agent/auxiliary_client.py`（约 4860 行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
 
 核心理念：**所有辅助任务共享同一个提供商解析链，避免每个消费者重复实现 fallback 逻辑。**
 
@@ -198,7 +198,21 @@ def _try_payment_fallback(failed_provider, task):
 3. 如果遇到支付错误（402/余额不足） → 自动切换到下一个可用 provider
 4. 记录日志通知用户降级
 
-### 7. 公开 API
+### 7. OAuth provider 辅助客户端构建
+
+辅助客户端为 OAuth 类 provider 提供专用构建器，把 OAuth 凭证解析后包装成统一的 `chat.completions.create()` 接口：
+
+- **xAI Grok OAuth（`xai-oauth`）**：`_build_xai_oauth_aux_client(model)` 解析 SuperGrok OAuth 凭证（`resolve_xai_oauth_runtime_credentials()`），用 `CodexAuxiliaryClient` 包装一个普通 `OpenAI` 客户端——因为 xAI 的 `/v1/responses` 端点说 OpenAI Responses API。**必须显式传入 model**（不给 Grok 钉死默认值，避免 xAI allowlist 漂移后悄悄失效）。`resolve_provider_client("xai-oauth", ...)` 走此路径。
+- **MiniMax 系列**：`minimax`、`minimax-oauth`、`minimax-cn` 同属 `_ANTHROPIC_COMPAT_PROVIDERS`，走 `_AnthropicCompletionsAdapter`。默认辅助模型：`minimax` / `minimax-cn` → `MiniMax-M2.7`，`minimax-oauth` → `MiniMax-M2.7-highspeed`。
+
+### 8. Provider 归属 header
+
+辅助客户端对特定 provider 附加计费/归属 header：
+
+- **NVIDIA NIM 计费来源**：`build_nvidia_nim_headers(base_url)` 对 `integrate.api.nvidia.com` 云端 NIM 流量附加 `X-BILLING-INVOKE-ORIGIN: HermesAgent`。该 header **按 host 门控**——只对云端 NIM 端点发送，本地/on-prem NIM（经 `NVIDIA_BASE_URL` 自定义）不附加。同步与异步客户端、自定义端点路径均已接线。
+- 所有辅助请求统一带 `User-Agent: HermesAgent/<version>`。
+
+### 9. 公开 API
 
 | 函数 | 用途 |
 |---|---|

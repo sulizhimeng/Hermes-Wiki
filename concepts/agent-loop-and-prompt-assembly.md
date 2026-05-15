@@ -1,10 +1,10 @@
 ---
 title: Agent Loop and Prompt Assembly
 created: 2026-04-07
-updated: 2026-04-07
+updated: 2026-05-15
 type: concept
 tags: [agent-loop, prompt-builder, architecture, component]
-sources: [hermes-agent 源码分析 2026-04-07]
+sources: [hermes-agent 源码分析 2026-04-07, 2026-05-15 增量验证]
 ---
 
 # Agent Loop and Prompt Assembly
@@ -58,6 +58,49 @@ while api_call_count < self.max_iterations and self.iteration_budget.remaining >
 - 消息格式遵循 OpenAI 标准：`{"role": "system/user/assistant/tool", ...}`
 - 推理内容存储在 `assistant_msg["reasoning"]`
 
+## 每轮文件变更校验页脚（2026-05-15）
+
+某些模型会在一轮内发起多个并行 `patch` / `write_file` 调用，部分失败
+（如 `Could not find old_string`），却在最终文本响应里声称"已修改全部
+文件"。为结构性地杜绝这种过度声称，Agent 在每轮结束时追加一个**文件变更
+校验页脚**（commit `c594a23`，#24498）。
+
+### 工作方式
+
+- **纯事后检查**：只读取本轮的工具结果，不发起新的 LLM 调用、不向历史
+  注入合成消息（保持 prefix cache），也不改动工具参数派发。
+- `_record_file_mutation_result()` 在每个工具调用后被调用（`blocked`
+  的调用不计入）。文件变更工具集由共享模块的 `FILE_MUTATING_TOOL_NAMES`
+  定义 —— 即 `{"write_file", "patch"}`（commit `c3094b4` 把它抽到
+  `agent/tool_result_classification.py`，与 `file_mutation_result_landed()`
+  助手一起）。
+- 按路径维护本轮状态字典 `_turn_failed_file_mutations`：首个失败胜出
+  （first-error-wins），对同一路径的**后续成功写入会清除该失败条目**，
+  因此单文件重试恢复不会被误报。
+- `_extract_file_mutation_targets()` 从工具参数解析受影响路径，覆盖
+  `write_file`、`patch-replace`、`patch-v4a`（单文件与多文件）。
+- 同时接入 `_execute_tool_calls_concurrent` 与
+  `_execute_tool_calls_sequential`，并行批量补丁与逐个编辑都被覆盖。
+
+### 页脚渲染与时机
+
+`_format_file_mutation_failure_footer()` 渲染最多 10 条路径
+（每条带首个错误预览），多余的折叠为 `… and N more`：
+
+```text
+⚠️ File-mutation verifier: N file(s) were NOT modified this turn despite
+any wording above that may suggest otherwise. Run `git status` or
+`read_file` to confirm.
+  • path/to/file — [patch] Could not find old_string
+```
+
+页脚在 Agent 循环退出后、`transform_llm_output` / `post_llm_call` 插件
+钩子运行**之前**追加，因此插件仍能看到并修改这段增强后的文本。仅当本轮
+存在真实文本响应且用户未中断时才追加。
+
+**开关**：`display.file_mutation_verifier`（bool，默认 true），
+`HERMES_FILE_MUTATION_VERIFIER` 环境变量可覆盖配置。
+
 ## 系统提示构建
 
 `AIAgent._build_system_prompt()` 按固定顺序拼接 `prompt_parts`，最终 `"\n\n".join(prompt_parts)` 返回完整 system prompt。实测结构见 [[prompt-builder-architecture]]，按这个顺序组装：
@@ -106,7 +149,14 @@ You MUST use your tools to take action — do not describe what you would do
 or plan to do without actually doing it.
 ```
 
-适用于模型：`gpt`, `codex`, `gemini`, `gemma`, `grok`
+适用于模型（`prompt_builder.py` 中的 `TOOL_USE_ENFORCEMENT_MODELS`）：
+`gpt`、`codex`、`gemini`、`gemma`、`grok`、`glm`。
+
+> **2026-05-15 新增 GLM**（commit `afa5b81`）：GLM 系模型
+> （`z-ai/glm-4.5-air`、`z-ai/glm-4.5-flash` 等）同样表现出
+> "describe-instead-of-call" 故障模式 —— kanban dispatcher 派发的免费档
+> GLM worker 会以 rc=0 干净退出却不调用 `kanban_complete` / `kanban_block`，
+> 触发 "protocol violation"。把 `glm` 加入强制列表后即注入工具使用强制指导。
 
 ### OpenAI 模型额外指导
 
@@ -205,8 +255,10 @@ DEVELOPER_ROLE_MODELS = ("gpt-5", "codex")
 
 ## 相关文件
 
-- `run_agent.py` — AIAgent 类实现
-- `agent/prompt_builder.py` — 系统提示组装（959 行）
+- `run_agent.py` — AIAgent 类实现 + 每轮文件变更校验页脚
+- `agent/prompt_builder.py` — 系统提示组装（`TOOL_USE_ENFORCEMENT_MODELS`）
+- `agent/tool_result_classification.py` — `FILE_MUTATING_TOOL_NAMES` 与
+  `file_mutation_result_landed()` 共享助手
 - `model_tools.py` — 工具编排
 - `agent/context_compressor.py` — 上下文压缩
 - `agent/prompt_caching.py` — Anthropic prompt 缓存
