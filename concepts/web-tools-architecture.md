@@ -1,23 +1,23 @@
 ---
 title: Web Tools 搜索/提取架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-17
 type: concept
 tags: [tool, toolset, architecture, component]
-sources: [tools/web_tools.py]
+sources: [tools/web_tools.py, agent/web_search_provider.py, agent/web_search_registry.py, plugins/web/]
 ---
 
 # Web Tools — 搜索/提取架构
 
 ## 概述
 
-Web Tools 位于 `tools/web_tools.py`（88KB/2099行），提供**多后端 Web 搜索/提取/爬取**能力。支持 4 种后端提供商，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
+Web Tools 位于 `tools/web_tools.py`（~1551行），提供**多后端 Web 搜索/提取/爬取**能力。支持 7 种后端提供商，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
 
 核心理念：**内容获取优先于浏览器自动化**——简单信息检索使用 web_search/web_extract（更快、更便宜），仅在需要交互时才使用 browser 工具。
 
 ## 架构原理
 
-### 四大后端
+### 七大后端
 
 | 后端 | Search | Extract | Crawl | 认证 |
 |---|---|---|---|---|
@@ -25,13 +25,28 @@ Web Tools 位于 `tools/web_tools.py`（88KB/2099行），提供**多后端 Web 
 | **Exa** | ✅ | ✅ | ❌ | EXA_API_KEY |
 | **Parallel** | ✅ | ✅ | ❌ | PARALLEL_API_KEY |
 | **Tavily** | ✅ | ✅ | ✅ | TAVILY_API_KEY |
+| **brave-free** | ✅ | ❌ | ❌ | 免费 |
+| **ddgs** | ✅ | ❌ | ❌ | 免费 |
+| **searxng** | ✅ | ❌ | ❌ | SearXNG 实例 URL |
+
+所有后端均为 `plugins/web/` 下的插件。
+
+### Provider 注册架构
+
+新架构以 **`WebSearchProvider`** ABC（`agent/web_search_provider.py:63`）为核心。每个 provider 通过 `supports_search` / `supports_extract` / `supports_crawl` 能力标志声明自己支持的能力，多能力 provider（Firecrawl、Tavily、Exa）可从单个类同时通告多种能力。
+
+provider 实现打包为 `plugins/web/` 下的插件（`plugin.yaml` 声明 `kind: backend` 与 `provides_web_providers:`），通过 `ctx.register_web_search_provider()` 注册到 `agent/web_search_registry.py`。旧的 `tools/web_providers/` 目录已被删除。
+
+三个 web 工具不再直接通过 `_get_backend()`（该函数仍存在），而是经 `agent.web_search_registry` 的 `get_active_search_provider()` / `get_active_extract_provider()` / `get_active_crawl_provider()` 按能力路由。
+
+新增了**按能力的配置 key**：`web.search_backend` / `web.extract_backend` / `web.crawl_backend`，可分别覆盖各能力使用的后端。
 
 ### 后端选择链
 
 ```python
 def _get_backend():
     """解析优先级:
-    1. config.yaml web.backend (显式指定: parallel/firecrawl/tavily/exa)
+    1. config.yaml web.backend (显式指定)
     2. FIRECRAWL_API_KEY / FIRECRAWL_API_URL / tool-gateway
     3. PARALLEL_API_KEY
     4. TAVILY_API_KEY

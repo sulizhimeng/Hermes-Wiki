@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-04-08 | Total pages: 33
+> Last updated: 2026-05-17 | Total pages: 39
 
 ## Entities
 
@@ -20,7 +20,7 @@
 - [[memory-system-architecture]] — 冻结快照模式、原子写入、安全扫描
 - [[agent-loop-and-prompt-assembly]] — Agent 循环、系统提示构建、平台提示、执行指导
 - [[skills-and-memory-interaction]] — Skills 与 Memory 的互补关系和决策树
-- [[toolsets-system]] — 工具分组系统、递归解析、14+ 平台工具集
+- [[toolsets-system]] — 工具分组系统、递归解析、24 个 hermes-* 工具集
 - [[session-search-and-sessiondb]] — FTS5 搜索 + LLM 摘要的跨会话回忆
 
 ### 性能与优化
@@ -41,7 +41,7 @@
 - [[configuration-and-profiles]] — 分层配置、Profile 隔离、自动迁移
 - [[hook-system-architecture]] — Hook 系统（Gateway Hooks + Plugin System），事件驱动+工具注册+上下文注入
 - [[mcp-and-plugins]] — MCP 集成、插件钩子系统、OAuth 支持
-- [[terminal-backends]] — 6 种终端后端、环境抽象、持久化 Shell
+- [[terminal-backends]] — 7 种终端后端、环境抽象、持久化 Shell
 - [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递
 - [[trajectory-and-data-generation]] — 轨迹保存、批量运行器、RL 训练环境
 - [[prompt-builder-architecture]] — 系统提示模块化组装，注入防护+技能缓存+模型特定指导

@@ -1,7 +1,7 @@
 ---
 title: Prompt Caching 优化架构
 created: 2026-04-07
-updated: 2026-04-08
+updated: 2026-05-17
 type: concept
 tags: [architecture, module, performance, cost-optimization, anthropic]
 sources: [agent/prompt_caching.py, run_agent.py]
@@ -11,7 +11,9 @@ sources: [agent/prompt_caching.py, run_agent.py]
 
 ## 概述
 
-Prompt Caching 位于 `agent/prompt_caching.py`（2KB/72行），实现 **Anthropic `system_and_3` 缓存策略**，在多轮对话中减少约 75% 的输入 token 成本。
+Prompt Caching 位于 `agent/prompt_caching.py`（79行），实现 **Anthropic `system_and_3` 缓存策略**，在多轮对话中减少约 75% 的输入 token 成本。
+
+> **历史说明**：此期间曾试验一个长期（1h）跨会话前缀缓存（`apply_anthropic_cache_control_long_lived`），但因易变的系统提示尾部会在会话中途变动、破坏上游缓存而被回退（#24778）。当前各处统一使用单一 `system_and_3` 布局，`apply_anthropic_cache_control` 是唯一的公开函数。
 
 核心理念：**最多 4 个 cache_control 断点 — 系统提示 + 最后 3 条非系统消息。**
 
@@ -118,7 +120,7 @@ marker = {"type": "ephemeral", "ttl": "1h"}  # 1 小时 TTL
 | 系统提示成本 | 每次付费 | 仅首次付费 |
 | 早期对话成本 | 每次付费 | 命中时仅付 cache_read |
 | 延迟 | 无影响 | 缓存命中时降低 |
-| 代码复杂度 | 低 | 72 行纯函数 |
+| 代码复杂度 | 低 | 79 行纯函数 |
 | 适用场景 | 所有模型 | 仅 Anthropic 模型 |
 
 ### 纯函数设计

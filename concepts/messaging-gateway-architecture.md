@@ -1,7 +1,7 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-04-29
+updated: 2026-05-17
 type: concept
 tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy]
 sources: [gateway/run.py, gateway/platforms/, hermes_cli/config.py]
@@ -11,7 +11,7 @@ sources: [gateway/run.py, gateway/platforms/, hermes_cli/config.py]
 
 ## 概述
 
-Gateway 是 Hermes Agent 的**统一消息网关**，支持 14+ 消息平台，从单一进程管理所有平台的连接和消息分发。
+Gateway 是 Hermes Agent 的**统一消息网关**，支持 23+ 平台（18 个内置适配器 + 5 个插件平台），从单一进程管理所有平台的连接和消息分发。
 
 ## 架构
 
@@ -28,6 +28,9 @@ gateway/
 ├── sticker_cache.py    # 贴纸缓存
 ├── stream_consumer.py  # 流式消费
 ├── channel_directory.py # 频道目录
+├── platform_registry.py # 平台插件注册表（PlatformRegistry）
+├── slash_access.py     # 按平台的 admin/user 斜杠命令分级
+├── shutdown_forensics.py # 关停诊断/取证记录
 └── platforms/          # 平台适配器
     ├── telegram.py
     ├── telegram_network.py
@@ -46,6 +49,7 @@ gateway/
     ├── bluebubbles.py
     ├── homeassistant.py
     ├── webhook.py
+    ├── msgraph_webhook.py
     ├── api_server.py
     └── base.py
 ```
@@ -71,8 +75,13 @@ gateway/
 | 微信/WeChat | iLink Bot API | 长轮询收消息，AES-128-ECB 媒体加密，QR 登录 |
 | QQ Bot | Official API v2 | WebSocket 入站(C2C/群/频道/DM) + REST 出站,语音转录(腾讯 ASR),allowlist + DM 配对 |
 | Webhook | HTTP | 外部事件接收 |
+| MSGraph Webhook | Microsoft Graph | 内置适配器，通过 Graph 订阅接收事件（`gateway/platforms/msgraph_webhook.py`） |
 | **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+） |
 | **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，参考实现） |
+| **LINE**（插件） | Messaging API | 插件平台（`plugins/platforms/line/`） |
+| **SimpleX Chat**（插件） | SimpleX | 去中心化加密消息（`plugins/platforms/simplex/`） |
+| **Google Chat**（插件） | Chat API | 企业消息（`plugins/platforms/google_chat/`） |
+| **Microsoft Teams**（插件） | Teams Apps SDK | aiohttp webhook 接收，线程回复通过 `app.reply()`（`plugins/platforms/teams/`） |
 
 ## 平台适配器插件化（v2026.4.23+）
 
@@ -204,6 +213,16 @@ class SessionStore:
 | `/stop` | 中断当前工作 |
 | `/status` | 平台状态 |
 | `/sethome` | 设置主平台 |
+| `/handoff` | 跨平台会话转移（`gateway/run.py` `_handoff_watcher` / `_process_handoff`，轮询 state.db 的 pending 会话并重新绑定到目标平台） |
+
+### 按平台的命令分级
+
+`gateway/slash_access.py` 提供按平台/聊天类型作用域的斜杠命令访问控制（`SlashAccessPolicy`）：
+
+- `allow_admin_from` — 可运行全部已注册斜杠命令的管理员用户 ID 列表
+- `user_allowed_commands` — 非管理员用户可运行的命令名白名单（未设置则非管理员无任何命令权限）
+- 群组作用域有独立的 `group_allow_admin_from` / `group_user_allowed_commands`
+- 若某作用域未设置 `allow_admin_from`，则该作用域的命令分级保持禁用（行为不变），需操作者显式列出至少一名管理员才会启用
 
 ## DM 配对
 
@@ -318,6 +337,10 @@ hermes gateway status   # 状态
 - **角色权限控制**（v0.10.0）：`DISCORD_ALLOWED_ROLES` 环境变量，逗号分隔 Role ID。与 `DISCORD_ALLOWED_USERS` 是 OR 关系——用户 ID 或角色任一匹配即放行，两个都没配则所有人可用
 - **channel_prompts**（v0.10.0）：按频道/话题注入不同的系统提示，也扩展到 Telegram（群组/论坛话题）、Slack、Mattermost
 - **@everyone 和角色 ping 屏蔽**：`allowed_mentions` 默认阻止 bot 触发全体通知
+- **任意附件接收**：`allow_any_attachment` 配置项允许接收未在白名单类型内的附件（untyped file 路径）
+- **频道历史回填**：默认开启，向共享会话注入最近频道历史（按用户 + 线程），避免每次热路径都全量扫描 `channel.history()`，受 `history_backfill` / `history_backfill_limit` 控制
+- **choices 渲染为按钮**：多选模式（`choices` 非空）时每个选项渲染为一个 Discord 按钮
+- **thread_require_mention**：`thread_require_mention` 配置项要求线程内消息也需 @mention 才触发
 
 ### 钉钉 DingTalk
 - Stream 协议连接

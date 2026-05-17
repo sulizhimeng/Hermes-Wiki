@@ -1,7 +1,7 @@
 ---
 title: Hermes 多 Agent 架构
 created: 2026-04-08
-updated: 2026-04-18
+updated: 2026-05-17
 type: concept
 tags: [architecture, module, agent, delegation, concurrency]
 sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, run_agent.py]
@@ -11,13 +11,16 @@ sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, run_agent.py]
 
 ## 概述
 
-Hermes 的多 Agent 能力分为**三种运行时机制**，全部在 Agent 对话过程中触发，不涉及外部脚本或离线工具：
+Hermes 的多 Agent 能力分为两个层面：**会话内（in-session）机制**——下表前三种，全部在单个 Agent 对话进程内触发，不涉及外部脚本或离线工具；以及独立的 **Kanban 编排层**——一个**跨进程（cross-process）**的多 Agent 机制。
 
-| 机制                    | 触发方式                  | 用途                   |
-| --------------------- | --------------------- | -------------------- |
-| **Delegate Task**     | LLM tool call（模型自主决定） | 并行子任务，最多 3 路         |
-| **Mixture of Agents** | LLM tool call（模型自主决定） | 多模型协同推理              |
-| **Background Review** | 系统计数器自动触发             | 后台提炼经验 → 创建/改进 skill |
+| 机制                    | 触发方式                  | 用途                   | 层面 |
+| --------------------- | --------------------- | -------------------- | ---- |
+| **Delegate Task**     | LLM tool call（模型自主决定） | 并行子任务，最多 3 路         | 会话内 |
+| **Mixture of Agents** | LLM tool call（模型自主决定） | 多模型协同推理              | 会话内 |
+| **Background Review** | 系统计数器自动触发             | 后台提炼经验 → 创建/改进 skill | 会话内 |
+| **Kanban Orchestrator** | gateway dispatcher tick | 任务看板分解 + worker 子进程编排 | 跨进程 |
+
+> **重要**：本页下面对"单进程内完成、没有 IPC"的描述**仅适用于会话内的三种机制**。Kanban 编排层是一个独立的跨进程层，详见第七节。
 
 ## 触发机制
 
@@ -464,7 +467,40 @@ def interrupt(self, message):
 | Mixture of Agents | `asyncio.gather`（异步协程收集） | 单线程异步 | 不落盘，内存 list |
 | Background Review | 守护线程 fire-and-forget | 单独守护线程 | 直接写 skill/memory 文件 |
 
-**一句话：全部在单进程内完成，没有任何进程间通信。**
+**一句话：会话内的三种机制全部在单进程内完成，没有任何进程间通信。** 唯一的例外是下面第七节的 Kanban 编排层——它是一个独立的**跨进程**多 Agent 机制。
+
+---
+
+## 七、Kanban 编排层 — 跨进程多 Agent
+
+前面六节描述的都是**会话内**机制。Kanban 编排器是一个**独立的、跨进程的**多 Agent 层：gateway dispatcher 在每个 tick 把任务从看板派发出去，并**spawn 独立的 worker 子进程**（`sys.executable -m hermes_cli.main`）来执行任务——这是真正的进程间编排，不是线程或协程。
+
+### 相关文件
+
+```
+hermes_cli/kanban.py             # CLI 入口与看板命令
+hermes_cli/kanban_db.py          # 看板 SQLite 存储、任务分解、worker spawn
+hermes_cli/kanban_decompose.py   # gateway dispatcher 自动分解路径
+hermes_cli/kanban_diagnostics.py # 看板健康诊断规则
+hermes_cli/kanban_specify.py     # 任务规格化
+```
+
+### 自动分解（auto-decomposition）
+
+新建的 triage 任务会被自动分解成可执行的 workgraph：
+
+- **`kanban.auto_decompose`**（默认 `True`）— 是否启用自动分解
+- **`kanban.auto_decompose_per_tick`**（默认 `3`）— 每个 dispatcher tick 最多分解的任务数
+- `decompose_triage_task`（`kanban_db.py:2780`）把 triage 任务扇出成子任务，根据子任务描述把它们路由到对应的 specialist profile，根任务保留为父节点；所有子任务 `done` 后根任务升级为 `ready`。
+
+### Step-0 Profile 发现
+
+编排器不使用 hardcoded 的 profile 名单，而是采用 **Step-0 profile discovery**：`_build_roster`（`kanban_decompose.py:214`）读取配置好的 profile roster，动态决定可用的 specialist profile 集合。
+
+### 诊断与并发控制
+
+- **`stranded_in_ready` 诊断**（`kanban_diagnostics.py:571`）：检测长期卡在 `ready` 状态没有 worker 接走的任务，阈值 `stranded_threshold_seconds`（默认 `1800` 秒 = 30 分钟）。
+- **`max_spawn`** 是一个**实时并发上限**（live concurrency cap），不是每 tick 的 spawn 预算——它限制的是同时运行的 worker 数量。
 
 ---
 
@@ -616,3 +652,4 @@ Discord 还有**多 bot 过滤**：消息 @了其他 bot 但没 @自己时自动
 - `tools/mixture_of_agents_tool.py` — 多模型协同推理
 - `tools/send_message_tool.py` — 跨平台消息投递（不属于多 Agent，归类于 messaging-gateway）
 - `run_agent.py` — IterationBudget 类、Background Review、中断传播
+- `hermes_cli/kanban.py` / `kanban_db.py` / `kanban_decompose.py` / `kanban_diagnostics.py` / `kanban_specify.py` — 跨进程 Kanban 编排层

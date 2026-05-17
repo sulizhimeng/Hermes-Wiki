@@ -1,7 +1,7 @@
 ---
 title: CLI 架构与终端交互设计
 created: 2026-04-07
-updated: 2026-04-11
+updated: 2026-05-17
 type: concept
 tags: [architecture, cli, terminal, ux]
 sources: [hermes-agent 源码分析 2026-04-07]
@@ -120,6 +120,16 @@ def set_active_skin(name: str): ...
 display:
   skin: "default"  # 或自定义皮肤名称
 ```
+
+## CLI 子命令
+
+入口点 `hermes_cli/main.py` 通过 `argparse` 子命令分发，内置子命令名集中在 `_BUILTIN_SUBCOMMANDS` frozenset（现已包含 `lsp`）。新增子命令：
+
+| 子命令 | 描述 |
+|------|------|
+| `hermes send` | 把 shell 脚本输出通过管道发送到任意已配置的消息平台（`hermes_cli/send_cmd.py` `register_send_subparser`） |
+| `hermes postinstall` | pip 安装用户的安装后依赖引导（`cmd_postinstall`，运行可选依赖的 postinstall 脚本，如 `agent-browser`） |
+| `hermes acp --setup-browser` | 为 registry 安装引导浏览器工具（`--setup-browser` 标志透传给 acp 子进程） |
 
 ## 优越性分析
 

@@ -122,3 +122,19 @@
   - 源码: gateway/hooks.py (170行), hermes_cli/plugins.py (609行)
   - 核心内容: Gateway Hooks 事件驱动(8种事件+通配符)，Plugin System 三级来源(用户/项目/pip)，PluginContext API(工具注册/消息注入/CLI命令/钩子)，缓存友好上下文注入
 - index.md 更新为 37 页
+
+## [2026-05-17] update | 同步 hermes-agent v2026.5.16（988 commits，2026-04-30 ~ 2026-05-17）
+拉取 hermes-agent 最新源码，逐项源码验证后更新 wiki：
+
+**新增 changelog:**
+- changelog/2026-05-17-update.md — 988 commits，v2026.5.16
+
+**更新概念页（18 个，均经源码验证）:**
+- agent-loop-and-prompt-assembly / prompt-builder-architecture / context-compressor-architecture / aiagent-class — run_agent.py 巨型重构，拆为 agent/ 下 15+ 子模块（agent_init/conversation_loop/system_prompt/...），系统提示三层装配（stable/context/volatile）
+- browser-tool-architecture / web-tools-architecture — Web/Browser Provider 插件化，tools/{web,browser}_providers/ 删除，新增 WebSearchProvider/BrowserProvider ABC + 注册表，provider 迁为 plugins/{web,browser}/
+- mcp-and-plugins / hook-system-architecture — 新增插件 facade（register_tool override/ctx.llm/register_web_search_provider/register_browser_provider）
+- messaging-gateway-architecture / gateway-session-management / cli-architecture — 23+ 平台（SimpleX/LINE/Google Chat/Teams）、/handoff、admin/user 命令拆分、hermes send/postinstall
+- smart-model-routing / auxiliary-client-architecture / provider-transport-architecture / prompt-caching-optimization — xAI Grok OAuth、NovitaAI、Codex app-server runtime、Qwen Cloud 改名、跨会话 prefix cache 回滚
+- skills-system-architecture / multi-agent-architecture / toolsets-system / tool-registry-architecture / terminal-backends / code-execution-sandbox — Curator 12 子命令、optional-skills 树、Kanban 跨进程编排器、x_search/video_gen toolset、7 种终端后端
+
+**其他:** README.md（版本 v2026.5.16）、index.md 同步
