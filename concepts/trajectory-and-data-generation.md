@@ -1,10 +1,10 @@
 ---
 title: 轨迹保存与训练数据生成
 created: 2026-04-07
-updated: 2026-04-14
+updated: 2026-05-18
 type: concept
 tags: [architecture, data-generation, training, trajectory, batch-runner]
-sources: [agent/trajectory.py, batch_runner.py, toolset_distributions.py, environments/, run_agent.py]
+sources: [agent/trajectory.py, batch_runner.py, toolset_distributions.py, run_agent.py]
 ---
 
 # 轨迹保存与训练数据生成
@@ -21,8 +21,6 @@ AIAgent 真实执行每个任务
 对话轨迹格式转换（ShareGPT 格式）
     ↓ trajectory.py
 JSONL 训练数据
-    ↓ environments/ + Atropos
-RL 强化学习训练
 ```
 
 ## 什么场景会用到
@@ -32,7 +30,6 @@ RL 强化学习训练
 | **Nous Research 内部** | 批量生成工具调用训练数据，迭代 Hermes 系列模型 |
 | **模型微调** | 想训练自己的工具调用模型时，用 batch_runner 生成高质量 SFT 数据 |
 | **单次调试** | `--save_trajectories` 保存单次对话轨迹，方便分析 Agent 行为 |
-| **RL 训练** | 通过 environments/ 接入 Atropos 框架做强化学习 |
 | **日常使用** | 默认关闭（`save_trajectories=False`），不影响正常对话 |
 
 ## 轨迹保存（trajectory.py）
@@ -130,20 +127,6 @@ run_browser_tasks.sh           # 浏览器任务批量脚本
 example_browser_tasks.jsonl    # 浏览器任务数据集示例
 ```
 
-## RL 训练环境（environments/）
-
-与 Tinker-Atropos 框架集成的强化学习环境：
-
-| 环境 | 用途 |
-|------|------|
-| `hermes_base_env.py` | 基础 Agent 环境 |
-| `agentic_opd_env.py` | Agentic 交互环境 |
-| `web_research_env.py` | Web 研究任务环境 |
-| `terminal_test_env/` | 终端命令测试环境 |
-| `hermes_swe_env/` | 软件工程任务环境 |
-| `tool_call_parsers/` | 工具调用解析器 |
-| `agent_loop.py` | Agent 循环与环境的桥接 |
-
 ## 普通用户需要关心吗
 
 **一般不需要**。这套系统默认全部关闭，日常聊天完全不受影响。
@@ -170,5 +153,4 @@ python batch_runner.py --dataset_file=your_tasks.jsonl --batch_size=10 --run_nam
 - `run_agent.py:2193-2371` — `_convert_to_trajectory_format()` + `_save_trajectory()`
 - `batch_runner.py` — 批量运行器（1287 行）
 - `toolset_distributions.py` — 工具集概率分布定义
-- `environments/` — RL 训练环境
 - `datagen-config-examples/` — 数据生成配置示例

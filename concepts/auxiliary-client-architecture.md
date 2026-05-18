@@ -1,7 +1,7 @@
 ---
 title: Auxiliary Client 辅助客户端架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-18
 type: concept
 tags: [architecture, module, component, agent, tool]
 sources: [agent/auxiliary_client.py]
@@ -11,7 +11,7 @@ sources: [agent/auxiliary_client.py]
 
 ## 概述
 
-Auxiliary Client 位于 `agent/auxiliary_client.py`（85KB/2127行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
+Auxiliary Client 位于 `agent/auxiliary_client.py`（5286 行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
 
 核心理念：**所有辅助任务共享同一个提供商解析链，避免每个消费者重复实现 fallback 逻辑。**
 
@@ -183,20 +183,43 @@ def shutdown_cached_clients():
 
 ```python
 def _is_payment_error(exc: Exception) -> bool:
-    """检测 HTTP 402 和余额不足错误"""
+    """检测 HTTP 402、余额不足以及每日配额耗尽错误"""
     if status_code == 402: return True
     if "credits" in err or "insufficient funds" in err: return True
     if "can only afford" in err or "billing" in err: return True
+    # 每日配额耗尽 — 与余额耗尽语义等价（status 402/429/None）
+    if "quota exceeded" in err or "tokens per day" in err: return True
+    if "resource exhausted" in err: return True  # Vertex AI / gRPC 配额
 
 def _try_payment_fallback(failed_provider, task):
     """跳过失败的提供商，尝试链中下一个可用提供商"""
 ```
 
+`_is_payment_error`（`agent/auxiliary_client.py:2235-2264`）除了 HTTP 402 / "insufficient funds" 之外，现在也把**每日 token 配额耗尽**视为支付错误——匹配 "quota exceeded"、"tokens per day"（Bedrock "Too many tokens per day"）、"resource exhausted"（Vertex AI / gRPC）等模式。这类错误在配额重置前无法服务请求，与余额耗尽功能等价，因此触发同样的 provider fallback 逻辑。
+
 **工作流程**：
 1. 调用 LLM API
 2. 如果遇到 max_tokens 参数错误 → 重试用 max_completion_tokens
-3. 如果遇到支付错误（402/余额不足） → 自动切换到下一个可用 provider
+3. 如果遇到支付错误（402/余额不足/每日配额耗尽） → 自动切换到下一个可用 provider
 4. 记录日志通知用户降级
+
+### 6.1 分层辅助 fallback 阶梯（commit a574246）
+
+对于**显式指定**辅助 provider 的任务（非 `auto` 模式），当主辅助 provider 调用失败时，按以下阶梯逐级降级：
+
+```
+1. 主辅助 provider                              ← 任务配置的 provider
+2. auxiliary.<task>.fallback_chain（来自 config）  ← _try_configured_fallback_chain()
+3. 主 agent 的 provider + model 安全网            ← _try_main_agent_model_fallback()
+4. 警告并重新抛出原始错误
+```
+
+`agent/auxiliary_client.py` 新增两个函数：
+
+- `_try_configured_fallback_chain()` — 读取 `config.yaml` 的 `auxiliary.<task>.fallback_chain`，逐个尝试条目，解析为 OpenAI 客户端。
+- `_try_main_agent_model_fallback()` — 用主 agent 的 provider+model 作为最后兜底。**跳过条件**：失败的 provider 本身就是主 provider；或主 provider 当前不健康。
+
+`auto` 模式用户不走此阶梯，仍沿用原有的支付降级链（第 6 节）。
 
 ### 7. 公开 API
 

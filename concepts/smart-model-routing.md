@@ -1,7 +1,7 @@
 ---
 title: Smart Model Routing 智能模型路由
 created: 2026-04-08
-updated: 2026-04-29
+updated: 2026-05-18
 type: concept
 tags: [architecture, module, model-routing, performance, caching, anthropic]
 sources: [agent/model_metadata.py, agent/models_dev.py, hermes_cli/model_switch.py, hermes_cli/model_normalize.py]
@@ -481,6 +481,20 @@ browser:
 - `prefers_gateway(section)` 共享辅助函数，4 个工具运行时统一使用
 - `hermes model` 交互流程：Nous 登录后展示可用工具列表，用户选择启用全部 / 仅未配置的 / 跳过
 - 免费层用户看到升级提示
+
+## 新增 Provider（2026-05）
+
+### xAI Grok OAuth
+
+新增 provider id `xai-oauth`，显示名 "xAI Grok OAuth (SuperGrok Subscription)"。通过 issuer `https://auth.x.ai` 进行 OAuth 认证，采用 PKCE loopback 回调 `127.0.0.1:56121/callback`。别名：`grok-oauth`、`x-ai-oauth`、`xai-grok-oauth`。与基于 API Key 的 `xai` provider 相互独立（`hermes_cli/auth.py:115-133,199-203`）。SuperGrok / X Premium+ 订阅者凭订阅直接调用 Grok 模型。
+
+### Azure Foundry — Microsoft Entra ID 认证
+
+新增 `agent/azure_identity_adapter.py`，提供 Azure Foundry 的**无密钥（keyless）认证**。通过 `azure-identity` SDK 的 `DefaultAzureCredential` 链获取 token，由 `model.auth_mode = entra_id` 激活。`build_token_provider()` 返回一个零参数 callable，OpenAI SDK 每次请求时调用它（透明刷新），不会把 JWT 持久化到 `auth.json`。scope 默认使用 Microsoft 文档化的 Foundry 推理 audience，可通过 `model.entra.scope` 覆盖。`azure-identity` 只在选用 `entra_id` 时才惰性导入。
+
+### NVIDIA NIM 计费来源头
+
+`build_nvidia_nim_headers()`（`agent/auxiliary_client.py:380-384`）为 `integrate.api.nvidia.com` 流量附加云端归因头（`X-BILLING-INVOKE-ORIGIN: HermesAgent`），用于 NVIDIA NIM 调用的计费来源标记。
 
 ## 与其他系统的关系
 

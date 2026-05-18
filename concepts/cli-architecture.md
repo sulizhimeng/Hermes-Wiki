@@ -1,7 +1,7 @@
 ---
 title: CLI 架构与终端交互设计
 created: 2026-04-07
-updated: 2026-04-11
+updated: 2026-05-18
 type: concept
 tags: [architecture, cli, terminal, ux]
 sources: [hermes-agent 源码分析 2026-04-07]
@@ -121,6 +121,23 @@ display:
   skin: "default"  # 或自定义皮肤名称
 ```
 
+## hermes send 子命令
+
+`hermes send` 把脚本输出 / stdin 管道转发到任意已配置的消息平台。命令在 `hermes_cli/main.py` 注册（`register_send_subparser`），实现于 `hermes_cli/send_cmd.py`，是 `tools.send_message_tool.send_message_tool` 的一层薄封装。
+
+```bash
+# 把脚本输出管道发送给某个目标
+./build.sh 2>&1 | hermes send --to telegram
+
+# 发送文件、带主题
+hermes send --to email --file report.pdf --subject "每日报告"
+
+# 列出可用目标
+hermes send --list
+```
+
+支持 `--to`、`--file`、`--subject`、`--list`、管道 stdin、线程化目标、以及 `#channel` 频道名解析。
+
 ## 优越性分析
 
 ### 与其他 Agent 框架对比
@@ -147,8 +164,9 @@ display:
 
 ## 相关文件
 
-- `cli.py` — CLI 主类
-- `hermes_cli/main.py` — 入口点和子命令
+- `cli.py` — CLI 主类（`_handle_sessions_command()` 处理经典 CLI 的 `/sessions` 斜杠命令）
+- `hermes_cli/main.py` — 入口点和子命令（注册 `hermes send`）
+- `hermes_cli/send_cmd.py` — `hermes send` 实现（`send_message_tool` 薄封装）
 - `hermes_cli/commands.py` — 斜杠命令定义
 - `hermes_cli/dump.py` — `hermes dump` 环境摘要（纯文本，用于调试/提 issue）
 - `agent/display.py` — 显示系统
