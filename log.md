@@ -122,3 +122,57 @@
   - 源码: gateway/hooks.py (170行), hermes_cli/plugins.py (609行)
   - 核心内容: Gateway Hooks 事件驱动(8种事件+通配符)，Plugin System 三级来源(用户/项目/pip)，PluginContext API(工具注册/消息注入/CLI命令/钩子)，缓存友好上下文注入
 - index.md 更新为 37 页
+
+## [2026-05-20] ingest+update | 同步 v0.12.0/v0.13.0/v0.14.0 三大版本（~2480 commits）
+
+Wiki 之前停在 2026-04-29，对应 v0.11.0 (v2026.4.23)。本期同步到 hermes-agent HEAD = `31a010010 feat(state.db): persist platform_message_id; restore yuanbao exact-id recall` (2026-05-20)，跨过三个发布：
+
+- v0.12.0 (v2026.4.30) — Curator Release，1096 commits
+- v0.13.0 (v2026.5.7)  — Tenacity Release（Kanban / `/goal` / 安全潮 8 P0），864 commits
+- v0.14.0 (v2026.5.16) — Foundation Release（PyPI / 减肥 / 冷启动 −19s / Grok 1M），808 commits
+
+**新增 6 个概念页**（源码全部 grep 确认）：
+
+- concepts/multi-agent-kanban.md
+  - 源码: hermes_cli/kanban*.py (~11200 行) + tools/kanban_tools.py (1297 行)
+  - 核心内容: SQLite 板 6 张表 / 9 个 worker tool (HERMES_KANBAN_TASK + orchestrator 双门控) / 自动分解 / Swarm 拓扑 / 1058 行诊断规则引擎
+- concepts/goal-loop-and-steering.md
+  - 源码: hermes_cli/goals.py (762 行)
+  - 核心内容: Ralph 循环 / continuation = 普通 user message / judge fail-OPEN / 用户消息抢占 / `/steer` next-turn note / `/queue` FIFO / `/handoff` 现场迁移
+- concepts/provider-plugin-system.md
+  - 源码: providers/base.py:39 ProviderProfile / providers/__init__.py / plugins/model-providers/ × 29
+  - 核心内容: 纯数据 dataclass + 5 个钩子 / 用户 last-writer-wins / 与 Transport 的 api_mode 耦合点 / pkgutil 兼容
+- concepts/hermes-proxy.md
+  - 源码: hermes_cli/proxy/{server.py:308, cli.py:142, adapters/{base,nous_portal,xai}.py:436}
+  - 核心内容: 凭证-attach 转发器 / 仅替换 Authorization / 路径白名单 / 每请求 resolve() OAuth refresh / SSE 原样转发
+- concepts/lsp-integration.md
+  - 源码: agent/lsp/* (11 文件) + tools/file_operations.py
+  - 核心内容: git-workspace 门控 / delta-only 诊断 / range_shift / per-workspace daemon / 失败回退原 in-process 语法检查
+- concepts/i18n-and-locales.md
+  - 源码: agent/i18n.py + locales/*.yaml (16 个)
+  - 核心内容: 薄切片设计 / fallback 链 / 不翻译 agent 输出 / 7 个生产语言 + 9 个 best-effort
+
+**更新 12 个现有概念页**：
+- concepts/prompt-caching-optimization.md      — + 5m/1h 双档 TTL + 跨 session 1h cache
+- concepts/messaging-gateway-architecture.md   — + 22 平台清单 + 5 插件平台细节
+- concepts/multi-agent-architecture.md         — + 5 种机制（含 Kanban + goal loop）+ orchestrator/max_spawn_depth/file_state 协调
+- concepts/browser-tool-architecture.md        — + 180× CDP 持久 WS + Chromium 自动启动 + SSRF floor
+- concepts/cli-architecture.md                 — + Ink TUI 双前端 + 新子命令 + 新斜杠命令
+- concepts/cron-scheduling.md                  — + no_agent 模式 + webhook 直送 + 注入扫描
+- concepts/security-defense-system.md          — + 20 个 P0 (v0.13.0 + v0.14.0) + OSV 扫描 + [all] 减肥
+- concepts/session-search-and-sessiondb.md     — + state.db 唯一权威 + JSONL 退役 commit 列表
+- concepts/gateway-session-management.md       — + 自动续约 + X-Hermes-Session-Key
+- concepts/smart-model-routing.md              — + 与 ProviderProfile 协作 + 全部新增 provider 列表
+- concepts/voice-mode-architecture.md          — + TTS provider registry + Piper / xAI custom voices
+- concepts/provider-transport-architecture.md  — + 与 ProviderProfile 分工说明 + HEAD 期 transport 清单
+- concepts/skills-system-architecture.md       — + Background Review v2 + Curator 9 子命令 + 新 bundled skills
+- concepts/web-tools-architecture.md           — + 按 capability 拆 backend + SearXNG + xAI Web Search
+- concepts/terminal-backends.md                — + 自适应 poll −195ms + Windows 修复
+
+**README + log**：
+- README.md：版本 v2026.4.23 → v0.14.0 (v2026.5.16) + 21 post-release commits；页数 37 → 43；最后更新 2026-04-29 → 2026-05-20
+- changelog/2026-05-20-update.md：新增完整更新日志，13 个主题节，每节带源码 path:line 验证
+- log.md：本条目
+
+**验证方式**：源码 clone 到 `/home/user/hermes-agent`，HEAD `31a010010`，每条结论用 grep / 行号 / 头部 docstring 复核；release notes (`RELEASE_v0.11.0.md` ~ `RELEASE_v0.14.0.md`) 用作发布主题索引。
+- index.md 更新为 43 页

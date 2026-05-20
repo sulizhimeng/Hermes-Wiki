@@ -1,23 +1,37 @@
 ---
 title: Web Tools 搜索/提取架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-20
 type: concept
-tags: [tool, toolset, architecture, component]
-sources: [tools/web_tools.py]
+tags: [tool, toolset, architecture, component, web-search, registry]
+sources: [tools/web_tools.py, agent/web_search_provider.py, agent/web_search_registry.py, plugins/web/]
 ---
 
 # Web Tools — 搜索/提取架构
 
 ## 概述
 
-Web Tools 位于 `tools/web_tools.py`（88KB/2099行），提供**多后端 Web 搜索/提取/爬取**能力。支持 4 种后端提供商，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
+Web Tools 提供**多后端 Web 搜索/提取/爬取**能力，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
 
 核心理念：**内容获取优先于浏览器自动化**——简单信息检索使用 web_search/web_extract（更快、更便宜），仅在需要交互时才使用 browser 工具。
 
+## v0.13.0+ 按 capability 拆分 + provider registry
+
+v0.13.0 (@kshitijk4poor PR #20061 / #20823 / #20841) 把 web 工具从单一后端模型重构为**按 capability 分别选 backend**：
+
+```yaml
+# config.yaml
+web:
+  search:   searxng     # 只做搜索
+  extract:  firecrawl   # 只做单页提取
+  crawl:    firecrawl   # 只做爬取
+```
+
+`agent/web_search_provider.py` 是 ABC，`agent/web_search_registry.py` 是注册表，`plugins/web/<provider>/` 是 plugin 布局，**与 [[provider-plugin-system]] 完全同构**。
+
 ## 架构原理
 
-### 四大后端
+### 后端
 
 | 后端 | Search | Extract | Crawl | 认证 |
 |---|---|---|---|---|
@@ -25,6 +39,9 @@ Web Tools 位于 `tools/web_tools.py`（88KB/2099行），提供**多后端 Web 
 | **Exa** | ✅ | ✅ | ❌ | EXA_API_KEY |
 | **Parallel** | ✅ | ✅ | ❌ | PARALLEL_API_KEY |
 | **Tavily** | ✅ | ✅ | ✅ | TAVILY_API_KEY |
+| **SearXNG**（v0.13.0） | ✅ | ❌ | ❌ | `plugins/web/searxng/`，self-hosted（公共实例可用） |
+| **xAI Web Search**（post-v0.14.0） | ✅ | — | — | `plugins/web/xai/provider.py` |
+| **Brave Free / DDGS**（HEAD） | ✅ | — | — | `plugins/web/brave_free/` + `plugins/web/ddgs/` 零配置后端 |
 
 ### 后端选择链
 

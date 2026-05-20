@@ -1,23 +1,27 @@
 ---
 title: Hermes 多 Agent 架构
 created: 2026-04-08
-updated: 2026-04-18
+updated: 2026-05-20
 type: concept
-tags: [architecture, module, agent, delegation, concurrency]
-sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, run_agent.py]
+tags: [architecture, module, agent, delegation, concurrency, kanban]
+sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, tools/kanban_tools.py, hermes_cli/kanban_db.py, hermes_cli/goals.py, run_agent.py]
 ---
 
 # Hermes 多 Agent 架构
 
 ## 概述
 
-Hermes 的多 Agent 能力分为**三种运行时机制**，全部在 Agent 对话过程中触发，不涉及外部脚本或离线工具：
+Hermes 的多 Agent 能力按"协作时间尺度"分类，共有 **5 种运行时机制**：
 
-| 机制                    | 触发方式                  | 用途                   |
-| --------------------- | --------------------- | -------------------- |
-| **Delegate Task**     | LLM tool call（模型自主决定） | 并行子任务，最多 3 路         |
-| **Mixture of Agents** | LLM tool call（模型自主决定） | 多模型协同推理              |
-| **Background Review** | 系统计数器自动触发             | 后台提炼经验 → 创建/改进 skill |
+| 机制                    | 触发方式                  | 时间尺度 | 用途                   |
+| --------------------- | --------------------- | -------- | -------------------- |
+| **Delegate Task**     | LLM tool call（模型自主决定） | 单 turn 内 | 并行子任务，最多 3 路         |
+| **Mixture of Agents** | LLM tool call（模型自主决定） | 单 turn 内 | 多模型协同推理              |
+| **Background Review** | 系统计数器自动触发             | 回合后台 | 后台提炼经验 → 创建/改进 skill |
+| **Kanban Worker** [[multi-agent-kanban]] | dispatcher 派生 + 板任务 | 跨 session / 跨机器 / 跨 backend | 长期分布式协作；崩溃恢复；重试预算 |
+| **`/goal` Ralph 循环** [[goal-loop-and-steering]] | 用户启动 + judge 决定 | 跨 turn | 同 session 内自动追问到完成 |
+
+第 4 种（Kanban）和第 5 种（goal loop）由 v0.13.0 引入；前 3 种来自更早版本。`send_message` 不算 agent 间通信，它是 gateway 消息投递工具（详见底部小节）。
 
 ## 触发机制
 
@@ -601,8 +605,35 @@ Discord 还有**多 bot 过滤**：消息 @了其他 bot 但没 @自己时自动
 
 详见 → [[configuration-and-profiles]]
 
+## v0.11.0+ 新增：Orchestrator 角色 + max_spawn_depth + 文件协调
+
+源码：`tools/delegate_tool.py` + `tools/file_state.py`（new）。
+
+- **`orchestrator` 子代理角色**：可以**自己再 spawn worker**（递归）。
+- **`max_spawn_depth`** 配置：默认 0（"flat" —— 子代理不可 spawn 孙代理）。设 1 允许 orchestrator → worker，设 2 允许 orchestrator → orchestrator → worker。
+- **文件协调层**（`tools/file_state.py`）：并行 sibling subagent 共享文件锁，写同一个文件不互踩。
+
+```yaml
+# config.yaml 示例
+delegate:
+  max_spawn_depth: 1     # orchestrator 可派 worker，但 worker 不能再 fork
+```
+
+## v0.13.0+ 新增：Kanban 长期协作（详见 [[multi-agent-kanban]]）
+
+不在本页展开。要点：
+
+- SQLite 板 (`<hermes_root>/kanban.db`) 做协调，**profile 不是隔离边界**。
+- 9 个 `kanban_*` 工具，**双门控**（`HERMES_KANBAN_TASK` env var 或 orchestrator profile）。
+- 心跳 + 死锁回收 + spawn 崩溃循环检测。
+- 自动分解：`hermes kanban decompose` 用辅助 LLM 把 triage 任务拆图。
+- Swarm 拓扑：planning → 并行 specialist → verifier → synthesizer，黑板是 root 任务的 JSON comments。
+- 诊断规则**只读**，从 (task, events, runs) 推导可恢复信号。
+
 ## 相关页面
 
+- [[multi-agent-kanban]] — 跨 session / 跨机器的分布式协作（v0.13.0 起）
+- [[goal-loop-and-steering]] — 同 session 内自动追问 Ralph 循环（v0.13.0 起）
 - [[configuration-and-profiles]] — 多 Profile 架构（另一种多 Agent 方案）
 - [[tool-registry-architecture]] — 子代理通过 registry 获取受限工具集
 - [[auxiliary-client-architecture]] — 子代理可配置独立的辅助模型

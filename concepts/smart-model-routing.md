@@ -1,13 +1,44 @@
 ---
 title: Smart Model Routing 智能模型路由
 created: 2026-04-08
-updated: 2026-04-29
+updated: 2026-05-20
 type: concept
-tags: [architecture, module, model-routing, performance, caching, anthropic]
-sources: [agent/model_metadata.py, agent/models_dev.py, hermes_cli/model_switch.py, hermes_cli/model_normalize.py]
+tags: [architecture, module, model-routing, performance, caching, anthropic, provider-plugin]
+sources: [agent/model_metadata.py, agent/models_dev.py, hermes_cli/model_switch.py, hermes_cli/model_normalize.py, providers/, plugins/model-providers/]
 ---
 
 # Smart Model Routing — 智能模型路由
+
+> **v0.13.0+ 重要变化**：模型路由的 provider 维度现在由 [[provider-plugin-system]] 提供 ——
+> `providers/base.py:39 ProviderProfile` ABC + `plugins/model-providers/` 29 个内置 provider 插件，每个 profile 暴露 `get_hostname()` / `fetch_models()` / `default_aux_model` 等钩子，作为本页解析链的**第一站**。
+> 详见 [[provider-plugin-system]]。
+>
+> **v0.12.0+ Remote model catalog manifest**：OpenRouter + Nous Portal 的 model catalog 不再硬编码在仓库，改成远端 manifest 拉取（PR #16033）。新模型上架**不需要发版**即可见。
+
+## v0.11.0 - v0.14.0 新增的 provider / 推理路径
+
+| 路径 | 描述 | api_mode |
+|------|------|---------|
+| **xAI Grok via SuperGrok OAuth (1M ctx)** | grok-4.3 升 1M token；`hermes auth add xai-oauth` | xAI Responses |
+| **GPT-5.5 via Codex OAuth** | ChatGPT Pro 订阅；live model discovery | Codex Responses |
+| **AWS Bedrock 原生**（Converse API） | `agent/transports/bedrock.py` | bedrock_converse |
+| **NVIDIA NIM** | 原生 | chat_completions |
+| **Arcee AI** | — | chat_completions |
+| **Step Plan**（StepFun） | — | chat_completions |
+| **Google Gemini CLI OAuth** | `agent/google_code_assist.py` | chat_completions / native |
+| **Gemini AI Studio 原生** | `agent/gemini_native_adapter.py` | gemini_native |
+| **Vercel ai-gateway** | pricing + 动态发现 | chat_completions |
+| **LM Studio**（升一等 provider） | live `/models`，doctor 检查 | chat_completions |
+| **GMI Cloud** | 多模型直 API | chat_completions |
+| **Azure AI Foundry** | 自动检测（`hermes_cli/azure_detect.py`） | chat_completions |
+| **MiniMax OAuth** | PKCE device-code（OpenClaw 移植） | chat_completions |
+| **Tencent Tokenhub** | — | chat_completions |
+| **HuggingFace Inference** | — | chat_completions |
+
+所有上述都以 `plugins/model-providers/<name>/` 的形式存在；可被 `$HERMES_HOME/plugins/model-providers/<name>/` 用户插件覆盖。
+
+---
+
 
 ## 概述
 

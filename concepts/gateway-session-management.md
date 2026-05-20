@@ -1,19 +1,67 @@
 ---
 title: Gateway Session 会话管理架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-20
 type: concept
-tags: [architecture, module, component, gateway, session-store, multi-platform]
-sources: [gateway/session.py, gateway/config.py]
+tags: [architecture, module, component, gateway, session-store, multi-platform, auto-resume]
+sources: [gateway/session.py, gateway/run.py, gateway/config.py, gateway/platforms/api_server.py]
 ---
 
 # Gateway Session — 网关会话管理架构
 
 ## 概述
 
-Gateway Session 位于 `gateway/session.py`（44KB/1081行），管理网关的**会话生命周期**：会话上下文追踪、消息持久化、重置策略评估、动态系统提示注入。
+Gateway Session 管理网关的**会话生命周期**：会话上下文追踪、消息持久化、重置策略评估、动态系统提示注入。
 
 核心理念：**每个平台/用户/线程的组合都有独立的会话，会话知道它从哪里来、要到哪里去。**
+
+## v0.13.0+ 新增能力
+
+### 1. Gateway 重启自动续约（v0.13.0）
+
+源码：`gateway/run.py:3497-3565`。
+
+```
+gateway 中断（崩溃 / hermes update / source-file reload / 进程被 kill）
+            │
+            ▼
+重启时 startup 期扫描
+            │
+            ▼
+找到"上次跑到一半被进程终止"的 session → 标记 resume_pending
+            │
+            ▼
+下一个 user message 到来时
+            │
+            ▼
+auto-resume：在既有 conversation 上续上，不新建 session
+```
+
+关键引用（注释直引）：
+
+> "Sessions auto-resume when the gateway comes back."
+
+适配器尚未 ready 时（line 3543）会日志 "Skipping auto-resume for %s: adapter not ready" 然后等下次。
+
+### 2. `X-Hermes-Session-Key` HTTP 头（v0.13.0）
+
+源码：`gateway/platforms/api_server.py:780-820`。
+
+```http
+POST /v1/chat/completions
+X-Hermes-Session-Id:  session-abc        # 已有：opt-in 会话连续
+X-Hermes-Session-Key: <opaque-string>    # 新：opt-in 长期记忆作用域
+```
+
+- 在 OpenAI 风格 API 上额外接受 `X-Hermes-Session-Key` 头。
+- 透传给 memory provider 当 **stable session 标识**。
+- **强制鉴权**：仅在已配置 API key 鉴权的 api_server 上接受，否则 line 802 拒绝。
+
+效果：远程 API 用户也能用 hermes 的长期记忆作用域 —— 同一个 key 跨 session 的请求落到同一 memory bucket。
+
+### 3. state.db 唯一权威 + JSONL 退役（详见 [[session-search-and-sessiondb]]）
+
+post-v0.14.0 一组重构砍掉了双存储路径，gateway 现在**只写 SQLite state.db**。详细 commit 列表见 changelog。
 
 ## 架构原理
 

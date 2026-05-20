@@ -1,10 +1,10 @@
 ---
 title: 终端后端与环境抽象层
 created: 2026-04-07
-updated: 2026-04-29
+updated: 2026-05-20
 type: concept
 tags: [architecture, environments, terminal, isolation]
-sources: [hermes-agent 源码分析 2026-04-07]
+sources: [tools/environments/, tools/terminal_tool.py]
 ---
 
 # 终端后端与环境抽象层
@@ -12,6 +12,12 @@ sources: [hermes-agent 源码分析 2026-04-07]
 ## 设计原理
 
 Hermes 支持 7 种终端后端，提供不同级别的隔离和持久化。统一的 `terminal` 工具抽象使 Agent 可以在不同后端间无缝切换。
+
+## v0.14.0+ 性能改进
+
+- **自适应 subprocess poll（post-v0.14.0，PR #29006）**：原 `_run_bash` 用固定 poll 间隔等子进程退出，长 tail 上累积浪费时间。改自适应后**每次工具调用平均减 ~195ms**。
+- **Termux TUI 冷启动加速（post-v0.14.0）**：手机端 hermes 启动从 X 秒减到 Y 秒（具体见 commit `c29b4f55d`）。
+- **Windows `creationflags` 冲突修复（post-v0.14.0）**：`_run_bash` 用 `windows_hide_flags` 与既有 kwargs 撞名时不再 throw（`hermes_cli/_subprocess_compat.py`）。
 
 ## 后端类型
 

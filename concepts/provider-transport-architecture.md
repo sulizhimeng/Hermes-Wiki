@@ -1,19 +1,60 @@
 ---
 title: Provider Transport 架构
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-05-20
 type: concept
-tags: [architecture, module, provider, transport, api-dispatch]
-sources: [agent/transports/base.py, agent/transports/anthropic.py, agent/transports/chat_completions.py, agent/transports/bedrock.py, agent/transports/codex.py, agent/transports/types.py, agent/transports/__init__.py, run_agent.py]
+tags: [architecture, module, provider, transport, api-dispatch, provider-profile]
+sources: [agent/transports/base.py, agent/transports/, providers/base.py, providers/__init__.py, plugins/model-providers/]
 ---
 
 # Provider Transport — API 路径统一抽象
 
 ## 概述
 
-Provider Transport 是 **v2026.4.17+** 引入的架构级重构，用统一的 ABC 抽象了所有 provider 的 API 数据路径（Anthropic Messages、OpenAI Chat Completions、OpenAI Responses API、AWS Bedrock）。位于 `agent/transports/`（1217 行），替代了之前散落在 `run_agent.py` 各处的 `if api_mode == "anthropic_messages": ... elif ...` 分支判断。
+Provider Transport 是 **v2026.4.17+** 引入的架构级重构，用统一的 ABC 抽象了所有 provider 的 API 数据路径（Anthropic Messages、OpenAI Chat Completions、OpenAI Responses API、AWS Bedrock）。位于 `agent/transports/`，替代了之前散落在 `run_agent.py` 各处的 `if api_mode == "anthropic_messages": ... elif ...` 分支判断。
 
 **核心理念**：**一个 provider 的消息转换、工具转换、参数构建、响应规范化，应该聚合在一个类里，而不是散落在调用点。**
+
+> **v0.13.0 起搭档新组件**：[[provider-plugin-system]] —— `providers/base.py:39 ProviderProfile` ABC + `plugins/model-providers/` 29 个内置插件。**Transport 拿数据路径，Profile 拿 provider 元信息**：transport 少而稳（4 个），profile 多且常新。
+
+## HEAD 期 transport 注册表
+
+`agent/transports/__init__.py:51-68` `_discover_transports()`：
+
+```python
+def _discover_transports() -> None:
+    try: import agent.transports.anthropic       # api_mode == anthropic_messages
+    except ImportError: pass
+    try: import agent.transports.codex            # api_mode == codex_responses
+    except ImportError: pass
+    try: import agent.transports.chat_completions # api_mode == chat_completions (默认)
+    except ImportError: pass
+    try: import agent.transports.bedrock          # api_mode == bedrock_converse (v0.11.0 新增)
+    except ImportError: pass
+```
+
+文件清单（HEAD，行数）：
+
+```
+anthropic.py            179   Anthropic Messages
+chat_completions.py     629   OpenAI 风格（含大多数 provider）
+bedrock.py              154   AWS Bedrock Converse（v0.11.0 #13814）
+codex.py                283   OpenAI Responses + Codex
+codex_app_server.py     399   Codex app-server（@kshitijk4poor）
+codex_app_server_session.py 810
+codex_event_projector.py 312
+hermes_tools_mcp_server.py 233 MCP 出站
+base.py                  89   ABC
+types.py                162   NormalizedResponse / ToolCall / Usage
+__init__.py              68   注册表 + 懒发现
+```
+
+`api_mode` 字符串是与 [[provider-plugin-system]] 的耦合点：
+
+```python
+profile = get_provider_profile("nvidia")         # ProviderProfile(api_mode="chat_completions", ...)
+transport = get_transport(profile.api_mode)      # ChatCompletionsTransport()
+```
 
 ## 架构原理
 

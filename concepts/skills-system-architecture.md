@@ -1,10 +1,10 @@
 ---
 title: Skills System Architecture
 created: 2026-04-07
-updated: 2026-04-29
+updated: 2026-05-20
 type: concept
-tags: [skill, architecture, module, prompt-builder]
-sources: [tools/skills_tool.py, tools/skill_manager_tool.py, tools/skills_hub.py, tools/skills_guard.py, run_agent.py, agent/prompt_builder.py, hermes_cli/plugins.py, agent/skill_utils.py]
+tags: [skill, architecture, module, prompt-builder, curator, background-review]
+sources: [tools/skills_tool.py, tools/skill_manager_tool.py, tools/skills_hub.py, tools/skills_guard.py, agent/prompt_builder.py, agent/skill_utils.py, agent/curator.py, agent/background_review.py, hermes_cli/curator.py]
 ---
 
 # 技能系统架构
@@ -12,6 +12,73 @@ sources: [tools/skills_tool.py, tools/skill_manager_tool.py, tools/skills_hub.py
 ## 概述
 
 Hermes Agent 的技能系统是一个**渐进式披露（Progressive Disclosure）**架构，灵感来自 Anthropic 的 Claude Skills 系统。核心理念是：只在需要时加载完整指令，平时只保留轻量元数据，以节省 token 预算。
+
+## v0.12.0+ 重大变化
+
+### 1. Background Review v2
+
+`agent/background_review.py` 在 v0.12.0 大幅重写（PRs #16026 / #17213 / #16099 / #16569 / #16204 / #15057）：
+
+- **rubric 化**（class-first），不再 free-form。
+- **active-update biased**：偏好"刚加载的那个 skill"，避免漂移到无关 skill。
+- 处理 `references/` 和 `templates/` 子文件。
+- **正确继承父运行时**：provider / model / credentials 真正传播到 fork。
+- **toolset 限制为 memory + skills**，杜绝 fork 跑去乱写文件。
+- memory provider clean shutdown。
+- prior-turn tool messages **不纳入摘要**，给 fork 干净 context。
+
+### 2. Curator 升级到 1781 行
+
+`agent/curator.py` 从 869 行涨到 **1781 行**。`hermes curator` 子命令族（`hermes_cli/curator.py`）：
+
+```
+hermes curator status         # 排序 skills（most-used / least-used）
+hermes curator run            # 立即触发一次 review，**同步执行**，结果直接看
+hermes curator pause          # 暂停 inactivity-triggered 自动 review
+hermes curator resume         # 恢复
+hermes curator pin <skill>    # 钉住，绕过自动转换
+hermes curator unpin <skill>
+hermes curator restore <skill> # 把归档的 skill 复活
+hermes curator list-archived  # 看历史归档
+hermes curator archive <skill> # 手动归档
+hermes curator prune          # 手动剪枝
+```
+
+- 报告：`logs/curator/<run>/run.json` + `REPORT.md`。
+- 状态分类：`consolidated`（合并到别的 skill）vs `pruned`（彻底剪掉）—— model + heuristic 双判定。
+- 统一在 `auxiliary.curator` 配置：`hermes model` 单独选 curator 模型，dashboard 单独管理。
+- **永远只动 agent-created skills**（`tools/skill_usage.is_agent_created`），bundled / hub-installed skills 双过滤保护。
+- **永远只归档，不删除**，可恢复。
+- Pinned skills **bypass 所有自动转换**。
+- 用 aux client，**永远不污染主 session 的 prompt cache**。
+
+### 3. `/reload-skills` —— prompt-cache-safe 重扫
+
+v0.11.0 引入 `/reload-skills`，**关键设计**是：重扫 `~/.hermes/skills/` 后**不重建 system prompt** —— 因为 skill 按需 `skill_view` 加载，不常驻 system prompt。所以新装/卸载 skill 不会让 prompt cache 失效。重扫完后通过 **next-turn note** 通知 agent，每个 skill 附 60 字符描述。
+
+> 注意 v0.11.0 早期一度有 `skills_reload` agent tool，refactor 中（commit `dd2d1ba5e`）删除 —— 因为它**会**失效 prompt cache。slash command `/reload-skills` 不动 cache。
+
+### 4. `/reload-mcp` —— 显式失效 cache
+
+MCP 工具会进系统提示，所以重载会失效 cache。CLI 弹一个 **"未来不再询问"** 的确认对话框。
+
+### 5. Pinned Skills 写保护
+
+`_pinned_guard()` 在 `skill_manage` 的 create/update/archive/delete 路径上拦截 —— curator pin 的 skill **任何手段都改不动**（包括 agent 自己想改）。
+
+### 6. 新内置 skill
+
+| skill | 来源 |
+|-------|------|
+| **ComfyUI v5**（`skills/creative/comfyui/`） | v0.12.0 从 optional 升 bundled，重写为官方 CLI + REST，硬件 gate 本地装 |
+| **TouchDesigner-MCP**（`skills/creative/touchdesigner-mcp/`） | v0.12.0 bundled + GLSL / post-FX / audio / geometry + 9 个 reference docs |
+| **Humanizer** | v0.12.0 — 剥离 AI-isms |
+| **claude-design** | v0.12.0 — HTML artifact + DESIGN.md Google spec |
+| **bundled hermes-achievements** | v0.12.0 plugin，扫描完整 session 历史 |
+| **direct-URL skill install** | v0.12.0 — `skill_manage install_from_url ...` |
+| **external_dirs 写权** | v0.12.0 — 配置后可 `skill_manage` 改第三方 skill 树 |
+
+---
 
 ## 核心组件
 

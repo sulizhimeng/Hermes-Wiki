@@ -1,19 +1,49 @@
 ---
 title: Prompt Caching 优化架构
 created: 2026-04-07
-updated: 2026-04-08
+updated: 2026-05-20
 type: concept
 tags: [architecture, module, performance, cost-optimization, anthropic]
-sources: [agent/prompt_caching.py, run_agent.py]
+sources: [agent/prompt_caching.py, agent/agent_init.py, run_agent.py]
 ---
 
 # Prompt Caching — Anthropic 缓存优化架构
 
 ## 概述
 
-Prompt Caching 位于 `agent/prompt_caching.py`（2KB/72行），实现 **Anthropic `system_and_3` 缓存策略**，在多轮对话中减少约 75% 的输入 token 成本。
+Prompt Caching 位于 `agent/prompt_caching.py`（79 行，HEAD），实现 **Anthropic `system_and_3` 缓存策略**，在多轮对话中减少约 75% 的输入 token 成本。
 
 核心理念：**最多 4 个 cache_control 断点 — 系统提示 + 最后 3 条非系统消息。**
+
+## TTL 档位（v0.14.0 起）
+
+Anthropic 支持两档 TTL：
+
+| 档位 | 写入成本 | 适用 |
+|------|---------|------|
+| `5m` (默认) | 1.25× 正常输入价 | 普通短对话、回合间停顿 < 5 分钟 |
+| `1h` | 2× 正常输入价 | 长对话、回合间停顿超过 5 分钟、跨 session 复用 |
+
+源码事实（`agent/prompt_caching.py:42-45`）：
+
+```python
+def _build_cache_marker(ttl: str = "5m") -> dict:
+    """Build a cache_control marker dict for the given TTL ('5m' or '1h')."""
+    marker = {"type": "ephemeral"}
+    if ttl == "1h":
+        marker["ttl"] = "1h"
+    return marker
+```
+
+启用方式（`agent/agent_init.py:413-422`）：
+
+```yaml
+# config.yaml
+prompt_caching:
+  cache_ttl: 1h          # 默认 5m，已知值仅 {5m, 1h}
+```
+
+> **跨 session 1h 复用（v0.14.0 重点）**：通过 Anthropic / OpenRouter / Nous Portal 用 Claude 时，system prompt + skills + memory 这段 prefix 在 1 小时内对所有 session 都热 cache。`/new` 起新 session，首次 response 直接从 warm cache 起。背景 memory review fork 也命中同一 cache（PR #23828 / #24778 / #25434）。
 
 ## 架构原理
 

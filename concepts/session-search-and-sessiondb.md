@@ -1,10 +1,10 @@
 ---
 title: Session Search and SessionDB
 created: 2026-04-07
-updated: 2026-04-18
+updated: 2026-05-20
 type: concept
-tags: [session-search, session-store, memory, architecture]
-sources: [hermes-agent 源码分析 2026-04-07]
+tags: [session-search, session-store, memory, architecture, state-db]
+sources: [hermes_state.py, tools/session_search_tool.py]
 ---
 
 # 会话搜索与 SessionDB
@@ -12,6 +12,31 @@ sources: [hermes-agent 源码分析 2026-04-07]
 ## 概述
 
 `session_search` 提供**跨会话的对话回忆能力**，使用 SQLite FTS5 全文搜索 + LLM 摘要生成。
+
+## v0.13.0+ 起：SQLite `state.db` 是网关消息的**唯一权威**
+
+post-v0.14.0 一系列 commit 把 gateway 历史上的双存储路径砍掉了：
+
+```
+33a3cf532  docs(sessions): state.db is canonical for gateway messages
+9d793e8e5  docs(session-log): state.db is canonical; ~/.hermes/sessions/ is legacy
+b4b118c20  refactor(gateway): drop _append_to_jsonl from mirror
+351fdcc6e  refactor(gateway): stop writing JSONL in append_to_transcript / rewrite_transcript
+971cfaa38  refactor(yuanbao): migrate recall to load_transcript()
+024a8e3ee  refactor(gateway): drop JSONL fallback in load_transcript
+1d27be0ff  test(gateway): pin SQLite-only load_transcript behaviour
+ce2678518  refactor(session-log): delete _save_session_log and all callers
+eeb747de2  feat(sessions): opt-in per-session JSON snapshot writer
+```
+
+含义：
+
+- **网关消息 transcript 的权威来源**永远是 `~/.hermes/state.db`。
+- `~/.hermes/sessions/*.json` 现在是 **legacy**，hermes **不再主动写**。已有目录不会被自动清理。
+- 如果还想拿 JSON 快照（外部工具消费），打开**opt-in per-session JSON snapshot writer**。
+- `platform_message_id` 现在持久化到 `state.db`（commit `31a0100`），yuanbao 等平台用此精确按消息 ID 召回。
+
+> 这是 v2026.4 一直在推进的 cleanup：之前每次写消息都要 transcribe 到 SQLite + JSONL 两份，存在不一致风险（JSONL truncate / 锁竞争）。现在只有一处真理来源。
 
 ## SessionDB
 

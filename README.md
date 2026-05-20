@@ -3,8 +3,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
-  <img src="https://img.shields.io/badge/Knowledge_Base-37_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v2026.4.23-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Knowledge_Base-43_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
+  <img src="https://img.shields.io/badge/Version-v0.14.0_(v2026.5.16)-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -58,20 +58,26 @@
 
 ### 多 Agent
 
-- [multi-agent-architecture](concepts/multi-agent-architecture.md): 4 种运行时机制（delegate_task/MoA/Background Review/send_message）
-- [configuration-and-profiles](concepts/configuration-and-profiles.md): 多 Profile 架构，完全隔离的 agent 实例（第二种多 Agent 方案）
+- [multi-agent-architecture](concepts/multi-agent-architecture.md): 5 种运行时机制（delegate_task/MoA/Background Review/send_message/Kanban worker）
+- [multi-agent-kanban](concepts/multi-agent-kanban.md): SQLite 看板 + 心跳 + 死锁回收 + 自动分解 + Swarm 拓扑 + 诊断（v0.13.0）
+- [goal-loop-and-steering](concepts/goal-loop-and-steering.md): `/goal` Ralph 循环 + `/steer` + `/queue` + `/handoff` 四种 session 级控制原语
+- [configuration-and-profiles](concepts/configuration-and-profiles.md): 多 Profile 架构，完全隔离的 agent 实例
 
 ### 平台与扩展
 
-- [cli-architecture](concepts/cli-architecture.md): CLI 架构、斜杠命令、hermes dump
+- [cli-architecture](concepts/cli-architecture.md): CLI 架构、斜杠命令、hermes dump/proxy/kanban/curator/migrate
 - [terminal-backends](concepts/terminal-backends.md): 7 种终端后端（含 Vercel Sandbox）、统一 spawn-per-call 执行模型
-- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 18+ 平台统一网关（含 IRC/腾讯元宝/微信/QQ Bot），平台适配器插件化（PlatformRegistry）、代理模式、channel_prompts、角色权限
-- [gateway-session-management](concepts/gateway-session-management.md): 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
-- [hook-system-architecture](concepts/hook-system-architecture.md): 双 Hook 系统（Gateway Hooks + Plugin System），register_command/dispatch_tool，Dashboard 插件
-- [mcp-and-plugins](concepts/mcp-and-plugins.md): MCP 集成、插件钩子系统、OAuth 支持
+- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 22 平台统一网关（17 内置 + 5 插件：IRC/Teams/Google Chat/LINE/SimpleX），PlatformRegistry 插件化
+- [gateway-session-management](concepts/gateway-session-management.md): 网关会话管理、state.db 唯一权威、startup 自动续约、`X-Hermes-Session-Key`
+- [hook-system-architecture](concepts/hook-system-architecture.md): 双 Hook 系统 + Shell Hooks + Plugin System，register_command/dispatch_tool
+- [mcp-and-plugins](concepts/mcp-and-plugins.md): MCP 集成（SSE + OAuth forwarding）、插件钩子系统、OAuth 支持
+- [provider-plugin-system](concepts/provider-plugin-system.md): `ProviderProfile` ABC + `plugins/model-providers/` 29 内置（v0.13.0）
+- [hermes-proxy](concepts/hermes-proxy.md): OAuth 提供方的 OpenAI 兼容本地代理（Codex/Aider/Cline 复用 Claude Pro / SuperGrok）（v0.14.0）
+- [lsp-integration](concepts/lsp-integration.md): post-write 语义诊断、git-workspace 门控、delta only（v0.14.0）
+- [i18n-and-locales](concepts/i18n-and-locales.md): 薄切片国际化、16 个 YAML 区域、7 个生产语言（v0.13.0）
 - [skin-engine](concepts/skin-engine.md): YAML 驱动的皮肤/主题系统
 - [worktree-isolation](concepts/worktree-isolation.md): Git Worktree 并行隔离模式
-- [cron-scheduling](concepts/cron-scheduling.md): 内置调度器、自然语言调度、多平台投递
+- [cron-scheduling](concepts/cron-scheduling.md): 内置调度器、自然语言调度、多平台投递、`no_agent` 脚本-only 模式（v0.13.0）、webhook 直送（v0.11.0）
 - [trajectory-and-data-generation](concepts/trajectory-and-data-generation.md): 轨迹保存、批量运行器、RL 训练环境
 
 ### 更新日志
@@ -80,17 +86,18 @@
 - [2026-04-10-update](changelog/2026-04-10-update.md): 293 commits，Context Engine 插件化、watch_patterns、WeChat、xAI、Discord/Slack 增强
 - [2026-04-17-update](changelog/2026-04-17-update.md): 641 commits (v0.10.0)，压缩 v3、Bedrock/Gemini/Ollama 新 Provider、Tool Gateway、插件命名空间技能、钉钉 QR 认证、Dashboard 插件
 - [2026-04-18-update](changelog/2026-04-18-update.md): 410 commits post-v0.10.0，Transport ABC 重构、Shell Hooks、Delegate Orchestrator、Step Plan/AI Gateway/xAI STT/KittenTTS、WeCom QR、Subagent 观测性
-- [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
+- [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23 / v0.11.0)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
+- [2026-05-20-update](changelog/2026-05-20-update.md): **~2480 commits 跨 v0.12.0/v0.13.0/v0.14.0** —— Kanban 多 Agent、`/goal` Ralph 循环、ProviderProfile 插件 ABC、`hermes proxy`、LSP 语义诊断、Checkpoints v2、Teams/LINE/SimpleX/Google Chat、SuperGrok OAuth(1M)、`pip install hermes-agent`、180× browser_console、跨 session 1h Claude cache、20 P0 安全潮、22 平台
 
 ---
 
 ## 统计信息
 
-- **概念页面**: 37 个
-- **更新日志**: 5 个
+- **概念页面**: 43 个（37 + 6 新增：multi-agent-kanban / goal-loop-and-steering / provider-plugin-system / hermes-proxy / lsp-integration / i18n-and-locales）
+- **更新日志**: 6 个
 - **源码覆盖**: 关键模块逐行验证
-- **跟踪版本**: v2026.4.23
-- **最后更新**: 2026-04-29
+- **跟踪版本**: **v0.14.0 (v2026.5.16) + 21 post-release commits to 2026-05-20**
+- **最后更新**: 2026-05-20
 
 
 ## 使用方式

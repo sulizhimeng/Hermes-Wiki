@@ -1,19 +1,46 @@
 ---
 title: Browser Tool 浏览器自动化架构
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-05-20
 type: concept
-tags: [tool, toolset, architecture, component, browser]
-sources: [tools/browser_tool.py, tools/browser_providers/]
+tags: [tool, toolset, architecture, component, browser, cdp]
+sources: [tools/browser_tool.py, tools/browser_supervisor.py, tools/browser_cdp_tool.py, hermes_cli/browser_connect.py]
 ---
 
 # Browser Tool — 浏览器自动化架构
 
 ## 概述
 
-Browser Tool 位于 `tools/browser_tool.py`（84KB/2202行），提供**多后端浏览器自动化**能力。支持 4 种运行模式，所有模式对 Agent 暴露完全相同的工具接口（navigate/click/type/scroll/vision 等）。
+Browser Tool 位于 `tools/browser_tool.py`，提供**多后端浏览器自动化**能力。所有后端对 Agent 暴露相同工具接口（navigate / click / type / scroll / vision / console / pdf 等）。
 
 核心理念：**基于 accessibility tree（ariaSnapshot）的文本化页面表示**，使 LLM Agent 无需视觉能力即可操作网页。
+
+## v0.14.0 关键变化
+
+### 1. `browser_console` 180× 性能提升
+
+源码：`tools/browser_tool.py:2819` 起 `_call_via_supervisor_cdp_ws()` 路径。
+
+```python
+# fast path: route through the supervisor's persistent CDP WS
+```
+
+历史上 `browser_console` 每次调用都会重建 DevTools session（连接 / 鉴权 / target attach），单次成本秒级。v0.14.0 引入 **supervisor 维护的持久 CDP WS 连接**，agent 全程共享同一条 socket，单次 `console` evaluate 从秒级 → 毫秒级。
+
+### 2. Chromium-family 自动启动（CDP）
+
+post-v0.14.0：`feat: auto-launch Chromium-family browser for CDP`（`hermes_cli/browser_connect.py`）。
+
+- 检测系统已装的 Chromium / Chrome / Brave / Edge。
+- 用合适的 `--remote-debugging-port` 自动起一个有头实例。
+- CDP `--user-data-dir` 隔离避免和用户日常浏览器互锁。
+- Brave binary 也支持（`test(cli): cover Brave binary CDP launch detection`）。
+
+效果：用户不用先手动打开浏览器再让 hermes 连 —— `hermes` 自己起一个。
+
+### 3. SSRF floor 强制
+
+v0.13.0 安全潮一部分：浏览器**默认拒绝 cloud-metadata 地址**（`169.254.x.x`、`metadata.*`）。即使 SSRF 防护被错误关掉，这条底线是 floor，不可越过。
 
 ## 架构原理
 
