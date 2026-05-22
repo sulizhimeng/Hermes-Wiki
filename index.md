@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-04-08 | Total pages: 33
+> Last updated: 2026-05-22 | Total pages: 40 | Tracking: v0.14.0
 
 ## Entities
 
@@ -34,19 +34,24 @@
 - [[security-defense-system]] — 5 层防御体系，100+ 威胁模式检测
 - [[interrupt-and-fault-tolerance]] — 中断传播、凭证池轮换、Fallback 模型链
 - [[credential-pool-and-isolation]] — 多密钥自动轮换、Profile 隔离
-- [[multi-agent-architecture]] — 多 Agent 体系，子代理委派+批量处理+跨平台通信
+
+### 多 Agent
+- [[multi-agent-architecture]] — 5 种 Agent 协作机制（delegate/MoA/Background Review/send_message/**Kanban**）
+- [[kanban-multi-agent-board]] — 可持久化任务板，SQLite + 心跳 + 熔断 + 幻觉拦截（v0.13+）
+- [[goal-and-ralph-loop]] — `/goal` + `/subgoal` 持续推进系统（v0.13/v0.14）
 
 ### 平台与扩展
 - [[cli-architecture]] — CLI 架构、斜杠命令补全、Skin 引擎
 - [[configuration-and-profiles]] — 分层配置、Profile 隔离、自动迁移
 - [[hook-system-architecture]] — Hook 系统（Gateway Hooks + Plugin System），事件驱动+工具注册+上下文注入
 - [[mcp-and-plugins]] — MCP 集成、插件钩子系统、OAuth 支持
-- [[terminal-backends]] — 6 种终端后端、环境抽象、持久化 Shell
-- [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递
+- [[terminal-backends]] — 7 种终端后端（含 Vercel Sandbox）、环境抽象、持久化 Shell
+- [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递、no_agent watchdog
 - [[trajectory-and-data-generation]] — 轨迹保存、批量运行器、RL 训练环境
 - [[prompt-builder-architecture]] — 系统提示模块化组装，注入防护+技能缓存+模型特定指导
 - [[context-compressor-architecture]] — 自动上下文压缩，结构化摘要+迭代更新+工具对完整性保障
 - [[model-tools-dispatch]] — 工具编排与调度，异步桥接+动态 schema 调整+参数类型强制
 - [[gateway-session-management]] — 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
-- [[messaging-gateway-architecture]] — 消息网关架构、平台适配器、DM 配对
+- [[messaging-gateway-architecture]] — 22 平台统一网关（含 Teams/LINE/SimpleX/Google Chat 插件平台）
+- [[hermes-proxy]] — OAuth 订阅 → OpenAI 兼容本地代理（v0.14）
 

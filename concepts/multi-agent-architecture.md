@@ -1,23 +1,31 @@
 ---
 title: Hermes 多 Agent 架构
 created: 2026-04-08
-updated: 2026-04-18
+updated: 2026-05-22
 type: concept
-tags: [architecture, module, agent, delegation, concurrency]
-sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, run_agent.py]
+tags: [architecture, module, agent, delegation, concurrency, kanban]
+sources: [tools/delegate_tool.py, tools/mixture_of_agents_tool.py, run_agent.py, hermes_cli/kanban_db.py, plugins/kanban/]
 ---
 
 # Hermes 多 Agent 架构
 
 ## 概述
 
-Hermes 的多 Agent 能力分为**三种运行时机制**，全部在 Agent 对话过程中触发，不涉及外部脚本或离线工具：
+Hermes 的多 Agent 能力分为 **5 种运行时机制**：4 种 in-process（单 session 内）+ 1 种跨 session 持久化（Kanban）：
 
-| 机制                    | 触发方式                  | 用途                   |
-| --------------------- | --------------------- | -------------------- |
-| **Delegate Task**     | LLM tool call（模型自主决定） | 并行子任务，最多 3 路         |
-| **Mixture of Agents** | LLM tool call（模型自主决定） | 多模型协同推理              |
-| **Background Review** | 系统计数器自动触发             | 后台提炼经验 → 创建/改进 skill |
+| 机制                    | 触发方式                  | 范围 | 用途                   |
+| --------------------- | --------------------- | ---- | -------------------- |
+| **Delegate Task**     | LLM tool call（模型自主决定） | 单 session | 并行子任务，最多 3 路 |
+| **Mixture of Agents** | LLM tool call（模型自主决定） | 单 session | 多模型协同推理 |
+| **Background Review** | 系统计数器自动触发             | 单 session | 后台提炼经验 → 创建/改进 skill |
+| **send_message**      | LLM tool call         | 跨 Profile（同进程网关） | 给其他 profile 发消息 |
+| **Kanban**            | dispatcher tick（每 60s） | **跨 session / restart / profile** | 持久化任务板，多 worker 协作 |
+
+v0.13+ 引入 [[kanban-multi-agent-board]] 作为**第 5 种**机制：把"AI 团队真正能跑完的项目板"做成一等公民。Kanban 不在本页详述，专门有页。
+
+> **何时选 Kanban，何时选 in-process？**
+> 单回合就能完成、最多并发 3 个子任务 → delegate_task。
+> 长跑迭代、需重启不丢、需多 profile → Kanban。
 
 ## 触发机制
 
