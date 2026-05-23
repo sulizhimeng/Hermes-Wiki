@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-05-10 | Total pages: 39
+> Last updated: 2026-05-11 | Total pages: 37 concepts + 2 entities + 8 changelogs | 跟踪版本 v2026.5.7
 
 ## Entities
 
@@ -43,18 +43,26 @@
 ### 平台与扩展
 - [[cli-architecture]] — CLI 架构、斜杠命令补全、Skin 引擎；`/goal`/`/kanban`/`/curator`/`hermes -z`
 - [[configuration-and-profiles]] — 分层配置、Profile 隔离、自动迁移
-- [[hook-system-architecture]] — Hook 系统（Gateway + Plugin），`transform_llm_output`（v0.13.0）
-- [[mcp-and-plugins]] — MCP 集成、SSE transport、OAuth 转发、image MEDIA tag（v0.13.0）
-- [[provider-transport-architecture]] — Transport ABC + ProviderProfile 全面插件化（v0.13.0）
+- [[hook-system-architecture]] — Hook 系统（Gateway Hooks + Plugin System），事件驱动+工具注册+上下文注入
+- [[mcp-and-plugins]] — MCP 集成、插件钩子系统、OAuth 支持
 - [[terminal-backends]] — 7 种终端后端（含 Vercel Sandbox）、环境抽象、持久化 Shell
-- [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递；`no_agent` watchdog（v0.13.0）
+- [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递（含 v0.13.0 `no_agent` 模式）
 - [[trajectory-and-data-generation]] — 轨迹保存、批量运行器、RL 训练环境
 - [[prompt-builder-architecture]] — 系统提示模块化组装，注入防护+技能缓存+模型特定指导
 - [[context-compressor-architecture]] — 自动上下文压缩，结构化摘要+迭代更新+工具对完整性保障
 - [[model-tools-dispatch]] — 工具编排与调度，异步桥接+动态 schema 调整+参数类型强制
-- [[provider-transport-architecture]] — Provider Transport ABC + ProviderProfile 协作
-- [[gateway-session-management]] — 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
-- [[messaging-gateway-architecture]] — 20+ 平台（含 Teams/Google Chat/LINE 插件平台），auto-resume
+- [[gateway-session-management]] — 网关会话管理，多平台会话隔离+PII 脱敏+重置策略（v0.13.0 跨重启 auto-resume）
+- [[messaging-gateway-architecture]] — 消息网关架构、20+ 平台、PlatformRegistry 插件化（IRC/Teams/LINE/Google Chat）
+- [[provider-transport-architecture]] — Transport ABC + 29 个 bundled model-provider 插件
+- [[skin-engine]] — YAML 驱动的皮肤/主题系统
+- [[worktree-isolation]] — Git Worktree 并行隔离模式（Checkpoints v2 单存储重写）
+
+## Changelogs
+
+- [[2026-04-09-update]] / [[2026-04-10-update]] / [[2026-04-17-update]] / [[2026-04-18-update]] / [[2026-04-29-update]] — v0.9 → v0.11 演进
+- [[2026-04-30-update]] — **v0.12.0 "The Curator Release"**（1,096 commits）
+- [[2026-05-07-update]] — **v0.13.0 "The Tenacity Release"**（864 commits）—— Kanban / `/goal` / video_analyze / 8 P0 安全
+- [[2026-05-11-update]] — post-v0.13.0（441 commits）—— 跨 session 1h prefix cache / HERMES_SESSION_ID ContextVar / Kanban 安全修复
 
 ### 更新日志
 - [[changelog/2026-04-09-update]] — 59 commits, 错误分类 + 三层溢出 + BlueBubbles

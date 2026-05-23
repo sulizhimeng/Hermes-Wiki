@@ -123,52 +123,27 @@
   - 核心内容: Gateway Hooks 事件驱动(8种事件+通配符)，Plugin System 三级来源(用户/项目/pip)，PluginContext API(工具注册/消息注入/CLI命令/钩子)，缓存友好上下文注入
 - index.md 更新为 37 页
 
-## [2026-05-10] update | 对齐 Hermes v0.12.0 + v0.13.0（1960 commits）
-基于 `/tmp/hermes-agent` HEAD = cdb6e5e (2026-05-10) 的全量源码对照，新增/更新如下：
+## [2026-05-11] update | 拉取 hermes 源码并同步 v0.12.0 / v0.13.0 / post-v0.13.0
+- 拉取 `https://github.com/NousResearch/hermes-agent` 完整历史
+- 上次跟踪版本: v2026.4.23 (v0.11.0)；新增 release: v2026.4.30 (v0.12.0) + v2026.5.7 (v0.13.0) + 441 post-release commits
+- 总变更范围: v2026.4.23..HEAD = ~3149 commits (含 merge)，分三个 changelog 覆盖
 
-**新增 changelog (1):**
-- changelog/2026-05-10-update.md — 覆盖 v0.12.0 (v2026.4.30) + v0.13.0 (v2026.5.7)，逐条标注源码行号
+### 新增 changelog 文件 (3)
+- `changelog/2026-04-30-update.md` — v0.12.0 "The Curator Release" (1,096 commits since v0.11.0)
+  - 源码验证: agent/curator.py (1781行), hermes_cli/curator.py (598行), providers/__init__.py, plugins/model-providers/ (29 bundled), agent/lmstudio_reasoning.py
+  - 核心内容: 自治 Curator 最终形态 + cron ticker 触发; Self-improvement review 重写; 4 个新 provider (GMI/Azure/LM Studio first-class/Tencent Tokenhub); Provider Registry; Gateway 平台插件化; Spotify 原生 7 工具; Google Meet; TTS Provider Registry + Piper; `hermes -z`; Cold-start ~57%↓
+- `changelog/2026-05-07-update.md` — v0.13.0 "The Tenacity Release" (864 commits since v0.12.0)
+  - 源码验证: tools/kanban_tools.py (1139行), hermes_cli/kanban_db.py (4839行), hermes_cli/goals.py (593行), tools/checkpoint_manager.py, tools/file_operations.py (delta lint), tools/vision_tools.py:1376 (video_analyze), gateway/run.py:5325-5430 (Discord guild-scoped role)
+  - 核心内容: Multi-agent Kanban (SQLite WAL CAS + heartbeat + 15min claim TTL + 多 board); `/goal` Ralph loop (judge fail-open, JSON 单行回复, parse-failure 3 次 cap); `video_analyze` 工具; xAI Custom Voices TTS; Google Chat 第 20 平台; i18n 7 个 locale (zh/ja/de/es/fr/uk/tr); Sessions auto-resume 跨重启; 安全 8 P0 (redaction 默认 ON / Discord guild-scoped CVSS 8.1 / WhatsApp 拒陌生人 / TOCTOU); Checkpoints v2 单 store 重写; Post-write delta lint (`_check_lint_delta`); Cron `no_agent` mode
+- `changelog/2026-05-11-update.md` — post-v0.13.0 (441 commits)
+  - 源码验证: agent/prompt_caching.py:10-22 (prefix_and_2 strategy), gateway/session_context.py (_SESSION_ID ContextVar via commit 271883447)
+  - 核心内容: Cross-session 1h prefix cache for Claude (#23828) ~85-90% 首轮 cost 砍; HERMES_SESSION_ID via ContextVar 暴露给 agent tools (#23847); `/goal` checklist+subgoal 栈 revert (#23813); sudo 加固 (catch -S/--askpass/shell privilege flags); Kanban 安全修复 (comment author sanitize, iteration-budget protocol guard, send_message gating fix); Model catalog 远程 manifest Nous Portal
 
-**新增 concept 页面 (2):**
-- concepts/kanban-multi-agent.md — 持久化多 Agent 协作板
-  - 源码: hermes_cli/kanban.py(2228), kanban_db.py(4740), kanban_diagnostics.py(649), tools/kanban_tools.py(1130), plugins/kanban/
-  - 核心: SQLite 任务表 + heartbeat/reclaim/zombie 检测 + workspace 隔离(scratch/worktree/dir) + 幻觉防护 + per-task max_retries + 多板跨 profile
-- concepts/goal-and-ralph-loop.md — `/goal` Ralph 循环
-  - 源码: hermes_cli/goals.py(593)
-  - 核心: GoalState dataclass, JUDGE_SYSTEM_PROMPT, SessionDB state_meta 持久化, consecutive_parse_failures 防死循环, /resume/pause/clear
+### 已有 wiki 页面更新 (2)
+- `concepts/prompt-caching-optimization.md` — 加入 `prefix_and_2` 策略章节: byte-stable prefix 设计、tools[-1] + system block[0] (1h) + 末 2 msg (5m)、Claude on Anthropic/OpenRouter/Nous Portal 触发条件、首轮新 session 输入 ~85-90% 成本节省。updated → 2026-05-11
+- `concepts/multi-agent-architecture.md` — 新增第 5 种运行时机制 "Multi-agent Kanban (v0.13.0+)"，覆盖与前 4 种 ephemeral 机制的本质区别 (SQLite 持久化/heartbeat/多进程/DAG)、并发原语 (WAL+CAS)、claim TTL、多 board 支持、worker tool schema-gated 暴露、v0.13.0 后续安全修复。updated → 2026-05-11
 
-**更新 concept 页面 (13):**
-- multi-agent-architecture — 第 5 种机制 Kanban
-- messaging-gateway-architecture — 20+ 平台、Google Chat/Teams/LINE 插件、`[[as_document]]` 指令、auto-resume
-- security-defense-system — v0.13.0 八个 P0 修复（redaction 默认/CVSS 8.1 Discord/WhatsApp 拒陌生人/TOCTOU/SSRF 地板/cron prompt-injection/debug share redact）
-- voice-mode-architecture — xAI Custom Voices 声音克隆、Piper 本地 TTS、TTS Provider Registry、`video_analyze` 工具
-- smart-model-routing — Provider 全面插件化、29 个 bundled 插件、LM Studio 一等公民、GMI/Azure Foundry/Tencent Tokenhub、Remote model catalog manifest、native multimodal image routing
-- hook-system-architecture — `transform_llm_output` 钩子、PluginContext 新增 register_platform/register_image_gen_provider/register_context_engine/register_skill
-- mcp-and-plugins — MCP SSE transport、OAuth 转发、stale-pipe retry、image → MEDIA tag、keepalive、TOCTOU 修复
-- cron-scheduling — `no_agent` watchdog 模式
-- prompt-caching-optimization — `cache_ttl: "1h"` 可配
-- web-tools-architecture — 7 个后端、SearXNG/Brave Free/DDGS、按 capability 选 backend
-- provider-transport-architecture — ProviderProfile ABC + plugins/model-providers/ 29 个
-- skills-system-architecture — Curator 子命令扩展（archive/prune/list-archived）、active-update bias、class-first prompt、bump_use 钩入
-- cli-architecture — `/goal`/`/kanban`/`/curator`/`/steer`/`/queue`/`/reload-skills`/`/clear`/`hermes -z` 一次性模式
-
-**根目录更新:**
-- index.md — 39 页，新增多 Agent 分类条目
-- README.md — badge 改 v0.13.0 (v2026.5.7)、39 pages、6 changelogs、Kanban + Goal 上链
-- log.md — 本条日志
-
-**源码核对锚点（全部对照 /tmp/hermes-agent）:**
-- hermes_cli/kanban.py:189,2181 / kanban_db.py:781,843 / kanban_diagnostics.py
-- hermes_cli/goals.py:108,148,282,391-410,546
-- tools/vision_tools.py:1167 (video_analyze), 1375 schema
-- tools/tts_tool.py:113 (Piper), 874 (xAI TTS+voice clone)
-- cron/jobs.py:498 / cron/scheduler.py:1040 (no_agent)
-- agent/redact.py:67 (HERMES_REDACT_SECRETS=true 默认)
-- agent/prompt_caching.py:43,58 (cache_ttl)
-- agent/transports/{anthropic,bedrock,chat_completions,codex}.py
-- providers/__init__.py / providers/base.py:25 / plugins/model-providers/ (29 bundled)
-- plugins/platforms/{google_chat,irc,line,teams}/
-- gateway/platforms/api_server.py:727 (X-Hermes-Session-Key)
-- gateway/run.py:3192 (auto-resume) / 9928 ([[as_document]])
-- hermes_cli/plugins.py:136 (transform_llm_output)
-- tools/mcp_tool.py:33,201 (SSE)
+### 元数据更新
+- README.md: 版本 badge v2026.4.23 → v2026.5.7；目录新增 3 个 changelog 条目；统计区"最后更新" 2026-04-29 → 2026-05-11
+- index.md: Last updated 2026-04-08 → 2026-05-11；新增 "Changelogs" 章节；terminal-backends 6→7、Vercel Sandbox 标注；gateway-session-management 标注跨重启 auto-resume；messaging-gateway-architecture 标注 20+ 平台 / PlatformRegistry 插件化；新增 [[provider-transport-architecture]] / [[skin-engine]] / [[worktree-isolation]] 入口（之前漏了）
+- log.md: 本条记录
