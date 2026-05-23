@@ -375,6 +375,45 @@ Kanban 是 Hermes 多 Agent 体系的**第 5 种机制**，区别于 in-process 
 
 ---
 
+## DB 抗污染（2026-05-23, PR #30858 + #30862）
+
+v0.14.0 之后用户社区出现"kanban.db 神秘损坏 → 自动重建覆盖旧任务"事故，根因是 [[interrupt-and-fault-tolerance|TLS FD recycling]] 把一个 24-byte TLS application-data record 写到了 SQLite header 上。本次 wave 加 **DB 端的失败闭合**：
+
+### `_guard_existing_db_is_healthy` + `KanbanDbCorruptError`（`kanban_db.py:1010-1132`）
+
+```
+connect(path)                              # kanban_db.py:1135
+  └─ _guard_existing_db_is_healthy(path)   # :1077-1132
+       ├─ resolve() + size>0 检查
+       ├─ sqlite3.connect(...) PRAGMA integrity_check
+       ├─ ok        → _INITIALIZED_PATHS 缓存
+       ├─ corrupt   → _backup_corrupt_db(path) + raise KanbanDbCorruptError
+       └─ Locked    → 让 sqlite3.OperationalError 透传（不当作 corrupt）
+```
+
+- **失败闭合**：integrity_check 非 `"ok"` → 直接 raise `KanbanDbCorruptError`（`:1010-1026`），调用者不能默写重建 schema。
+- **保留证据**：损坏 DB 拷到 `<db>.corrupt.<YYYYMMDD_HHMMSS>.bak`，WAL/SHM sidecar 一并备份（`:1029-1074`）。
+- **缓存友好**：探针成功后路径入 `_INITIALIZED_PATHS`，同进程后续 `connect()` 跳过重检（`:1113`）。
+- **锁争用不误判**：`sqlite3.OperationalError` 直接 `raise`，避免对 WAL checkpoint 中的 DB 误备份（`:1124-1126`）。
+
+### 备份路径 CodeQL 硬化（`c4b8f5e`）
+
+`_backup_corrupt_db` 所有写发生在 `path.resolve().parent` 之内，每次构造 `candidate = parent / basename_only` 后断言 `candidate.parent != parent → return None`（`kanban_db.py:1051-1052, 1057-1058, 1069-1070`）。WAL/SHM sidecar 同样走 resolved-parent 路径，`..` 段在任何 I/O 之前被 collapsed。功能等价，仅给静态分析器看 containment 证明。163/163 测试通过。
+
+## Scratch workspace 一次性可见性（2026-05-23, PR #30949）
+
+`hermes_cli/kanban_db.py:3109-3181`：用户社区报告"progress files vanished, no warning anywhere"，本 commit 把"scratch = ephemeral by design"补成"by design **且可见**"。
+
+首次在该 install 创建 scratch workspace 时：
+
+1. 一次性 warning log："scratch workspaces are ephemeral — they're deleted when the task completes."（`:3117-3121`）
+2. 在 task 上 append `tip_scratch_workspace` 事件（`:3174`）—— Dashboard 等 `task_events` 消费者可见
+3. Touch sentinel `~/.hermes/kanban/.scratch_tip_shown`（`:3141-3181`），整 install 静默后续创建
+
+行为不变，scratch 还是 ephemeral；只是把契约显性化。docs（en + ko）也加 "Deleted when the task completes" / "Preserved on completion"。
+
+---
+
 ## 文件 / 函数索引
 
 | 功能 | 位置 |
@@ -400,6 +439,9 @@ Kanban 是 Hermes 多 Agent 体系的**第 5 种机制**，区别于 in-process 
 | MCP 工具 | `tools/kanban_tools.py:49-90` |
 | Dashboard API | `plugins/kanban/dashboard/plugin_api.py` |
 | Gateway dispatcher | `gateway/run.py:4996-5219` |
+| `KanbanDbCorruptError` + `_guard_existing_db_is_healthy` | `kanban_db.py:1010-1132`（2026-05-23+） |
+| `_backup_corrupt_db`（CodeQL 硬化） | `kanban_db.py:1029-1074` |
+| Scratch tip + sentinel | `kanban_db.py:3109-3181`（2026-05-23+） |
 
 ---
 

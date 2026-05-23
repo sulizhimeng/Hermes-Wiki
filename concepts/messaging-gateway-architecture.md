@@ -484,6 +484,7 @@ slack:
 - **链接预览控制**（v0.10.0）：`config.yaml` 中 `telegram.disable_link_preview` 关闭消息链接预览
 - **clarify 内联键盘按钮**（#24199，v2026-05-15+）：gateway 模式下 clarify 工具通过 Telegram inline keyboard 按钮呈现选项。`gateway/run.py` 现在向 `AIAgent` 传入 `clarify_callback`；`tools/clarify_gateway.py` 是事件驱动原语（register/wait_for_response/resolve_gateway_clarify，per-session FIFO + `threading.Event` 阻塞）。`gateway/platforms/base.py` 提供带编号文本兜底的抽象 `send_clarify`，所有适配器（Discord、Slack、WhatsApp、Signal、Matrix 等）开箱可用
 - **原生 draft 流式**（Bot API 9.5+，v2026-05-10+）：通过 `sendMessageDraft` 实现 DM 回复的流式草稿，token 到达时平滑动画预览，替代旧的 `editMessageText` 轮询路径
+- **状态消息 in-place edit**（#30864 / PR #30141，commit `9acf949`，2026-05-23+）：lifecycle / compression / context-pressure 状态回调不再每次 append 新气泡。`gateway/platforms/telegram.py:1915-1946 send_or_update_status()` 维护 `{(chat_id, status_key) → message_id}` 缓存（`telegram.py:471-474 self._status_message_ids`），首发 `send`，后续相同 key `edit`，edit 失败丢缓存 fallback fresh send。`gateway/run.py` 在 `_status_callback_sync` 走该路径（adapter 支持时），否则退到 `adapter.send()`。+5 测试覆盖 first send / edit / failure-fallback / 跨 key & chat 隔离
 
 ### Discord
 - 支持服务器和私聊
@@ -516,6 +517,7 @@ slack:
 - 需要 WhatsApp Bridge (Node.js)
 - 群消息需要前缀触发
 - 允许列表控制
+- **JID/LID alias 跨形稳定 pairing**（commit `52a368f`，2026-05-23+）：WhatsApp 会在 `xxx@s.whatsapp.net`（JID）和 `xxx@lid`（LID）两种 user identifier 之间漂移。`gateway/pairing.py:124-140 _user_id_aliases()` 把同一用户的所有 alias 折叠成一个 set，`_user_ids_match()` 用集合相交判等；`approve_pair` 和 list/lookup 路径（`pairing.py:377-378`）通过 `expand_whatsapp_aliases` 把 LID/JID 两种形式都登记进 `{platform}:{alias}` 索引，approval 不会因为对端 identifier 切形就失效。+73 测试覆盖各跨形场景
 
 ### Home Assistant
 - 智能家居事件监控
@@ -538,6 +540,11 @@ slack:
 - **Telegram `clarify` inline keyboard**（29d7c24）：将 `clarify` 工具的多选项映射成 inline keyboard buttons，用户点击直接回填。
 - **Telegram DM 群组允许列表**（1f71217）：DM 模式下也支持 group user allowlist，并保留 pre-#17686 chat-ID-in-_USERS 配置。
 - **QQBot guild ACL 修复**（d69a0b2）：guild messages 和 guild DMs 也走 ACL 检查，堵住 allowlist 旁路。
+- **QQBot 健康度修复簇**（2026-05-23+，腾讯团队 @walli）：
+  - `bbd77d1` —— `_send_identify` 加 `INTERACTION` intent bit（`1<<26`），原本 approval-button click 触发的 `INTERACTION_CREATE` 事件根本没被网关派发；video/file 附件描述带本地 cached path，方便 LLM 引用文件回发
+  - `a54f5af` —— `gateway/platforms/qqbot/adapter.py` 处理 WS opcode 7（Server Reconnect：关 WS 触发重连，保留 session 用 Resume）和 opcode 9（Invalid Session：看 `d` 字段判 resumable，仅 false 时才清 session）；删除 4009（连接超时是 resumable，不该清 session）；扩展 fatal close set 到 4001/4002/4010-4014（无意义重试停掉）
+  - `0e7448d` —— `_download_and_cache(original_name=...)` 用 attachment 元数据原文件名，不再用 CDN hash 名（之前文件名是 `qqdownload_...oadftnv5` 一类）
+  - `60b0a0e` —— `_guess_ext_from_data` / `_looks_like_silk` 把 `data[:5/4]` 改成 `data[:6]`，原 slice 长度不够匹配 6 字节字面量 `#!SILK`，依赖 9 字节 `#!SILK_V3` 和 2 字节 `0x02!` 兜底
 - **Signal 多设备 group message 处理**（e713932）：linked device 经 syncMessage 路径下发的 group message 现在正确处理。
 - **Weixin 内容指纹去重**（7a8ee8b）：相同内容的重复 webhook 投递通过 fingerprint 跳过。
 - **WeCom AES key 自动 padding**（8f4c0bf）：base64 AES key 解码前自动 pad，兼容上游格式差异。

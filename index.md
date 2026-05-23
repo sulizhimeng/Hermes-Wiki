@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-05-22 | Total pages: 45 concepts + 2 entities + 26 changelogs | Tracking: v0.14.0
+> Last updated: 2026-05-23 | Total pages: 45 concepts + 2 entities + 27 changelogs | Tracking: v0.14.0 (hermes-agent/master HEAD `874c2b1`)
 
 ## Entities
 
@@ -69,6 +69,7 @@
 - [[worktree-isolation]] — Git Worktree 并行隔离模式
 
 ### 更新日志（按时间倒序）
+- [[2026-05-23-update]] — 49 commits daily delta（Nous Portal one-shot、Kanban DB 抗污染、Memory drift guard、审批沉默契约、TLS FD 三层防御、Plugin RCE 第二段、Telegram/WhatsApp/QQBot）
 - [[2026-05-22-update]] — 2,578 commits（v0.12.0 → v0.14.0）
 - [[2026-05-20-update]] — v0.14.0（~2,480 commits）
 - [[2026-05-19-update]] — 2,418 commits（v2026.4.23 → v2026.5.16）

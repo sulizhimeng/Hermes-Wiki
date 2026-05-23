@@ -675,6 +675,54 @@ CLI 现在显式展示该状态（commit `b6e0741`）：
 
 总计 v0.13 → v0.14 关闭 **20 个 P0 + 86 个 P1** 安全/可靠性问题。
 
+## v0.14 增量安全 wave（2026-05-23）
+
+### "Silence is not consent" 契约（PR #30879 / #24912）
+
+用户事故：2026-05-13，用户离开对话，agent 请求批准 `rm -rf .git`，`gateway_timeout` 默认 300s 超时，**agent 自行删了 `.git`**。
+
+根因是 model-interface layer：原 message `"BLOCKED: Command timed out. Do NOT retry this command."` 被某些模型读成"换条命令达同样目的"。底层 `check_all_command_guards` 行为本来就对 —— timeout / 显式 deny 都返回 `approved=False`，`terminal_tool` surface `status=blocked` —— bug 只是模型读法。
+
+`tools/approval.py:1301-1330`：消息明确点名三条 evasion 路径都禁（retry / rephrase / **achieve the same outcome via a different command**），超时附加 `" Silence is not consent."` 后缀；返回字典新增 `outcome ∈ {"timeout","denied"}` + `user_consent: False`，plugin / hook / audit 不再需要 string-parse 消息分辨。
+
+显式 deny 路径（`approval.py:1391-1406`）同形，区别只在不附 silence-is-not-consent 后缀（它**是**显式 deny，不是沉默）。
+
+原本应当防止事故发生的机制（timeout treat-as-deny → BLOCKED → `post_approval_response` hook fires with `choice="timeout"`）未改动，本 commit 只硬化 agent 的读法。+4 新测试，329/329 通过。
+
+### Plugin RCE 双保险 —— GHSA-5qr3-c538-wm9j 第二段（PR #29156）
+
+`hermes_cli/web_server.py:_mount_plugin_api_routes` 把 dashboard plugin 的 manifest `api` 字段以 `importlib.util.spec_from_file_location` 当 Python 模块**导入** —— 设计上就是 RCE。两个原本无害的原语让它变可利用：
+
+1. **绝对路径吞噬目录**：`Path('safe/dashboard') / '/tmp/evil.py'` resolve 成 `/tmp/evil.py`
+2. **`..` 遍历爬出 dashboard 目录**：静态资源 handler 用 `is_relative_to` 防过，api-mount 路径漏防
+
+三层修复（commit `8bf9922`）：
+
+1. **`_safe_plugin_api_relpath` 发现期 validator**（`web_server.py:4050`）：拒绝绝对路径、`..` 遍历、空 / 非字符串、resolve 后逃出 `dashboard/` 的路径；`has_api` 跟随 sanitized 值，前端不显示假 "Backend API" badge
+2. **`_mount_plugin_api_routes` import 前再验**（`:4547 _api_file`）—— 防 `_dir` 被 post-cache 篡改 / 未来 caller 绕过 discovery validator
+3. **Project plugins 拒绝 backend import** —— `./.hermes/plugins/` 随 CWD 走，威胁模型把它当攻击者可控；静态 JS/CSS 仍可扩展 UI，但 Python `api` 不再 auto-import
+
+加上前一 commit `09f85f2` 的 **truthy env-gate fix**（`HERMES_ENABLE_PROJECT_PLUGINS` 按 truthy 解释，不是只看 `!= "0"`），advisory chain 在**两个独立 choke point** 失败。
+
+### Webhook 动态路由 INSECURE_NO_AUTH 安全栏（commit `61ac118`）
+
+`gateway/platforms/webhook.py:329-339`：动态 route reload 时，secret 为 `INSECURE_NO_AUTH` 的 route **仅在 loopback host 允许**：
+
+```python
+if effective_secret == _INSECURE_NO_AUTH and not _is_loopback_host(self._host):
+    logger.warning("[webhook] Dynamic route '%s' skipped: INSECURE_NO_AUTH "
+                   "is only allowed on loopback hosts.", k)
+    continue
+```
+
+静态 route 早就有同 guard（`webhook.py:159-167`），动态 route 在 mtime-gated hot reload 时漏了 —— 现在补齐，dashboard 这种把订阅注入到 dynamic-routes JSON 文件的场景不能误把测试 secret 暴露到 public host。
+
+### Skills guard `--force` 文案纠偏（commit `6942b18`）
+
+跟进 `0f8215f` / `789043b` 的 verdict-logic + `--force` limitation。原 block message 不论 verdict 都末尾接 "Use --force to override"，但 `--force` 已经在 dangerous community/trusted skill 上无效化，把用户绕进死循环。
+
+`tools/skills_guard.py` 改成：dangerous verdict 走特定 message 解释**为什么** `--force` 不再有效，非 dangerous block 继续 pin 旧的 `--force` hint。+2/+1 回归测试。
+
 ## 相关页面
 
 - [[memory-system-architecture]] — 记忆内容安全扫描机制

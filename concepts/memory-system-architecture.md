@@ -84,6 +84,37 @@ def _file_lock(path):
 
 读者总是看到完整的旧文件或完整的新文件，无中间状态。
 
+### 外部漂移防护（2026-05-23, PR #30877 / #26045）
+
+原子写不能解决另一个问题：**MEMORY.md / USER.md 被 tool 之外的写者改了**（patch tool、用户手编、`cat >> MEMORY.md` 的 onboarding）。
+
+生产事故：两个并发 session，A 用 patch tool 追加 ~8KB 结构化内容到 MEMORY.md（无 § 分隔符）。B 后来用 stale in-memory state（1 entry, ~331 chars）调 `memory(action=replace)`。`_read_file` 把 A 的 8KB 解析为一个 entry，replace 把它截到 333 字节 —— **8KB 内容静默被销毁**。
+
+`tools/memory_tool.py:482-530 _detect_external_drift` 在每次 add/replace/remove 之前跑双信号检测：
+
+```python
+def _detect_external_drift(self, target):
+    raw = read(path)
+    parsed = self._parse(raw)
+    roundtrip = self._serialize(parsed)
+    max_entry_len = max(len(e.content) for e in parsed)
+    # 信号 1：roundtrip 字节级不等价（分隔符 / 编码异常）
+    # 信号 2：单 entry 超过整 store 限额（memory=2200, user=1375 chars）
+    drift_detected = (raw.strip() != roundtrip) or (max_entry_len > char_limit)
+    if not drift_detected: return None
+    bak_path = path.with_suffix(path.suffix + f".bak.{ts}")
+    shutil.copy2(path, bak_path)
+    return str(bak_path)
+```
+
+**触发后**：
+
+- `_reload_target` 写 `.bak.<ts>` 快照（`memory_tool.py:219-231, 530`）
+- `add` / `replace` / `remove` **拒绝 flush**（`:277-282, 329-331, 381-383`）—— 原文件保持原样
+- 错误字典携带 `.bak` 路径 + 模型可读的 remediation：`"integrate missing entries via memory(add=...) one at a time, then rewrite the file clean"`（`memory_tool.py:108-130 _drift_error`）
+
+USER.md 同样保护。Tests 137 → 144（+7 个用例 pin 三种 mutator 的拒绝行为、`.bak.<ts>` 命名、false-positive 净化场景）。
+
 ### 安全扫描
 
 所有写入内容经过 12 种威胁模式检测 + 不可见 Unicode 字符检测：

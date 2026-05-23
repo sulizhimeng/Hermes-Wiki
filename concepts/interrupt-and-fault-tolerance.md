@@ -463,11 +463,69 @@ gateway 重启
 auto-resume 检测到 pending session → 加载 checkpoint → 续跑
 ```
 
+## TLS FD 回收竞态三层防御（2026-05-23, PR #29507）
+
+生产事故：`kanban.db` 在没有 schema 改动的情况下被 24 字节的 TLS application-data record 改写 ——
+[[kanban-multi-agent-board|kanban DB 抗污染]] 处理的是受害侧，本节处理的是根因。
+
+### 故障链
+
+```
+helper 调 socket.shutdown(SHUT_RDWR) + socket.close()
+                                        ↑ stranger thread（中断检查 / stale-call 检测）
+release FD 整数到内核
+内核把同一整数 recycle 给 kanban dispatcher 下一次 open(kanban.db)
+但 httpx worker 还在 SSL BIO 缓存里持有这个 FD 整数
+worker 延迟的 TLS flush 写一条 24-byte 应用数据 record
+                                  ↓
+            写到了 kanban.db 的 SQLite header 上
+```
+
+### Layer-1：`force_close_tcp_sockets` 只 shutdown 不 close（commit `e2a7d73`）
+
+`agent/agent_runtime_helpers.py` +55 −18：
+
+- 移除 `socket.close()`，**只保留 `shutdown(SHUT_RDWR)`** —— 任意线程安全（只发 FIN + 中断 `recv`/`send`，不释放 FD）
+- owning httpx worker 自己 unwind 时会通过同一个 Python `socket.socket` 对象 close —— 该对象在 `close(2)` 之前把 `_fd` 原子置 -1，没有 FD aliasing 窗口
+- 日志字段 `tcp_force_closed=N` 保留语义（现在 counts shutdowns），dashboard / 日志解析器无需改动
+
+### Layer-2：跨线程 client.close() 改为 abort + defer（commit `30c22f1`）
+
+`agent/chat_completion_helpers.py:97-141`（非流式）+ `:1312-1345`（流式）：
+
+```python
+def _set_request_client(client):
+    request_client_holder["thread_ident"] = threading.get_ident()
+    request_client_holder["client"] = client
+
+def _close_request_client_once(...):
+    stranger_thread = (
+        request_client_holder.get("thread_ident")
+        != threading.get_ident()
+    )
+    if stranger_thread:
+        agent._abort_request_openai_client(request_client, reason=reason)
+        # 只 shutdown(SHUT_RDWR) pool sockets + 写 deferred_close=stranger_thread 标记
+        # holder 保持 populated → owning worker 的 finally 来做真正 close
+    else:
+        agent._close_request_openai_client(request_client)
+        # 正常 close
+```
+
+新日志字段 `deferred_close=stranger_thread` 区分两种 close 通道，便于生产 triage。
+
+### Layer-3：回归测试 (commit `5b6f0b6`)
+
+`tests/run_agent/test_create_openai_client_reuse.py` +12 行：pin shutdown-only + thread-aware close contract。
+
+三层独立 —— 任一回滚不会立刻重开 advisory。Kanban 那一侧已经独立加了 `KanbanDbCorruptError` 失败闭合（详见 [[kanban-multi-agent-board]] §DB 抗污染），定居一道纵深防御。
+
 ## 相关页面
 
 - [[credential-pool-and-isolation]] — 凭证池与轮换机制
 - [[multi-agent-architecture]] — 子代理中断传播与预算隔离
 - [[agent-loop-and-prompt-assembly]] — AIAgent 中断标志与主循环
+- [[kanban-multi-agent-board]] — DB 抗污染（FD 回收事故的受害侧防御）
 
 ### 相关文件
 
@@ -477,3 +535,5 @@ auto-resume 检测到 pending session → 加载 checkpoint → 续跑
 - `tools/interrupt.py` — 中断工具
 - `tools/checkpoint_manager.py` — Checkpoints v2（state 持久化 + pruning + disk guardrails）
 - `gateway/run.py` — Auto-resume（lines 3543, 3565, 5620）
+- `agent/agent_runtime_helpers.py` — `force_close_tcp_sockets` shutdown-only（2026-05-23+）
+- `agent/chat_completion_helpers.py:97-141, 1312-1345` — Thread-aware close contract（`_abort_request_openai_client` / `_close_request_openai_client`）

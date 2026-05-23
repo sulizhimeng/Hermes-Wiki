@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
   <img src="https://img.shields.io/badge/Knowledge_Base-45_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v0.14.0-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Version-v0.14.0_(874c2b1)-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -82,8 +82,9 @@
 - [cron-scheduling](concepts/cron-scheduling.md): 内置调度器、自然语言调度、多平台投递、`no_agent` watchdog 模式
 - [trajectory-and-data-generation](concepts/trajectory-and-data-generation.md): 轨迹保存、批量运行器、RL 训练环境
 
-### 更新日志（26 个，最新优先 — 完整列表见 [index.md](index.md)）
+### 更新日志（27 个，最新优先 — 完整列表见 [index.md](index.md)）
 
+- [2026-05-23-update](changelog/2026-05-23-update.md): **49 commits daily delta** — `hermes setup --portal` + `hermes portal {status,open,tools}` 一键起步、Kanban DB 抗污染（`KanbanDbCorruptError` + CodeQL 硬化 + scratch tip）、Memory.md/USER.md 外部漂移防护、审批"沉默 ≠ 同意"契约（#24912）、TLS FD 回收三层防御（#29507）、Plugin RCE 第二段（GHSA-5qr3-c538-wm9j）、Webhook INSECURE_NO_AUTH 动态路由保护、Telegram 状态消息 in-place edit、WhatsApp JID/LID alias、QQBot intent/op7-9/SILK 修复簇、OpenCode Go reasoning controls
 - [2026-05-22-update](changelog/2026-05-22-update.md): **v0.14.0 集大成** — Kanban、`/goal`+`/subgoal`、Hermes Proxy、PyPI + Windows、Provider/Browser/Web/Video/Image/TTS 全面插件化、Curator 1781 行、LSP semantic diagnostics、Codex app-server、跨 session 1h Claude cache、Cold-start -19s、Teams/LINE/SimpleX/Google Chat、12 P0 + 50 P1 关闭
 - [2026-05-20-update](changelog/2026-05-20-update.md): v0.14.0（~2,480 commits across v0.12.0/v0.13.0/v0.14.0）
 - [2026-05-16-update](changelog/2026-05-16-update.md): v2026.5.16（2,890 commits since v2026.4.23）
@@ -101,10 +102,10 @@
 
 - **概念页面**: 45 个
 - **实体页面**: 2 个
-- **更新日志**: 26 个
+- **更新日志**: 27 个
 - **源码覆盖**: 关键模块逐行验证
-- **跟踪版本**: v0.14.0（v2026.5.16）
-- **最后更新**: 2026-05-22
+- **跟踪版本**: v0.14.0（hermes-agent/master HEAD `874c2b1`）
+- **最后更新**: 2026-05-23
 
 
 ## 使用方式

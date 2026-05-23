@@ -244,6 +244,12 @@ remote model catalog manifest（v0.12.0）通过 profile.fetch_models 的远端 
 
 ---
 
+## 7.1 OpenCode Go reasoning controls（2026-05-23+）
+
+PR `3589960` + 跟进 `70aaa77`：`plugins/model-providers/opencode-zen/__init__.py` +63 行，把 OpenCode Go 的 reasoning controls（如 `reasoning_effort`）暴露成 provider profile field。`70aaa77` 进一步把 OpenCode Go 路径下的 Kimi 子模型 reasoning_effort 输出对齐 `KimiProfile` 形状 —— 同 provider 下不同模型分支不再分歧。
+
+171 行新增测试（`tests/model_providers/test_opencode_go_profile.py`）pin 行为契约。
+
 ## 8. 验证
 
 ```

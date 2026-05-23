@@ -283,6 +283,8 @@ hermes send --list
 | `hermes proxy {start, status, list-providers}` | v0.14.0 | OpenAI-compatible 本地代理：`hermes_cli/proxy/cli.py:30,78,102` |
 | `hermes acp --setup-browser` | v0.14.0 | Zed ACP registry 引导浏览器工具安装 |
 | `pip install hermes-agent && hermes` | v0.14.0 | PyPI 正式上架（`pyproject.toml:6` `name = "hermes-agent"`） |
+| `hermes setup --portal` | v0.14.0 (2026-05-23) | 一键 Nous Portal 起步：OAuth + provider=nous + Tool Gateway opt-in；幂等可重复跑（`hermes_cli/setup.py:3063-3173 _run_portal_one_shot`） |
+| `hermes portal {status, open, tools}` | v0.14.0 (2026-05-23) | 状态/订阅页/Tool Gateway 路由薄表面，缺省派发 `status`（`hermes_cli/portal_cli.py:175-220`，注册 `hermes_cli/main.py:11877-11880`） |
 
 ### 新斜杠命令（v0.13.0+）
 
@@ -298,6 +300,45 @@ hermes send --list
 | `/reload-skills` | v0.12.0 | rescan `~/.hermes/skills/`（不打破 prompt cache） |
 | `/reload` | v0.12.0 | `.env` 热重载（TUI 也支持） |
 | `/mouse` | v0.12.0 | toggle ConPTY phantom mouse 注入 |
+
+## Nous Portal 一键起步（v0.14.0, 2026-05-23+）
+
+PR #30860（commit `b4cf5b6`）把 Portal 订阅做成 CLI 一等公民，三个面向不同用户的 surface：
+
+### `hermes setup --portal`
+
+`hermes_cli/setup.py:3063-3173 _run_portal_one_shot`：单一命令把新用户从零带到可工作的 Hermes：
+
+1. 调 `auth_add_command` 等价路径跑 OAuth device flow（已登录则跳过 — `setup.py:3103-3110`）
+2. `config.model.provider = "nous"`，让运行时挑 Nous 默认模型（`setup.py:3155`）
+3. `prompt_enable_tool_gateway(config)` 一句 Y/n 把 Web/Image/TTS/Browser 全部路由进 Portal（`setup.py:3164`）
+
+OAuth 失败 / 用户取消 / 其他异常各自独立提示，永不静默回退。
+
+### `hermes portal {status, open, tools}`
+
+`hermes_cli/portal_cli.py`：
+
+| 子命令 | 行为 | 源码 |
+|------|------|------|
+| `status`（默认） | Portal 登录 + 当前 inference provider + Tool Gateway 5 类目路由摘要 | `portal_cli.py:39-108` |
+| `open` | `webbrowser.open("https://portal.nousresearch.com/manage-subscription")` | `portal_cli.py:111-123` |
+| `tools` | 列 Web/Image/TTS/Browser/Modal 五类 + 每类 partner + 当前 provider | `portal_cli.py:126-172` |
+
+默认派发 `status` —— gh / kubectl 同惯例（`portal_cli.py:177-181`）。注册在 `main.py:11877-11880`，并加进 `_BUILTIN_SUBCOMMANDS`（`main.py:10657`）防被插件发现快路径覆盖。
+
+### Tool Picker "Nous-included" 标记
+
+`hermes_cli/tools_config.py`（+44 行）：
+
+- 已登录 Nous → provider rows 显星 ★ + 副标 "Included with your Nous subscription"（`tools_config.py:1999-2015 managed_by_nous` 检查）
+- 未登录但被提示输入付费 API key（Firecrawl/FAL/ElevenLabs/Browserbase 等）→ 单行淡灰 "Available through Nous Portal subscription."（`tools_config.py:2430-2447 _show_portal_hint`），且仅当该类目有 Nous-managed sibling
+
+非订阅用户体验完全不变。
+
+### Portal request tags（`agent/portal_tags.py`）
+
+所有发往 Nous Portal 的请求统一打 `product=hermes-agent` + `client=hermes-client-v<__version__>` —— 4 处独立 call site 历史会漂移（见 PR #24194），由此模块集中（`portal_tags.py:37-65`）。版本来自 live `hermes_cli.__version__`，避免被预计算成常量。
 
 ## Native Windows 支持（v0.14.0+）
 
@@ -332,6 +373,9 @@ hermes send --list
 - `hermes_cli/goals.py` — `/goal` Ralph loop 实现
 - `hermes_cli/kanban.py` — Kanban CLI（2677 行）
 - `hermes_cli/proxy/` — OpenAI-compatible 本地代理（v0.14.0+）
+- `hermes_cli/portal_cli.py` — `hermes portal {status,open,tools}` 薄表面（2026-05-23+）
+- `hermes_cli/setup.py:3063-3173` — `hermes setup --portal` 一键起步
+- `agent/portal_tags.py` — Portal 请求标签集中点（`product=hermes-agent` + `client=hermes-client-v<ver>`）
 - `hermes_cli/dump.py` — `hermes dump` 环境摘要（纯文本，用于调试/提 issue）
 - `agent/display.py` — 显示系统
 - `hermes_cli/skin_engine.py` — 皮肤引擎

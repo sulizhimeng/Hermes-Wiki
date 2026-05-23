@@ -176,3 +176,29 @@
 - goal-and-ralph-loop (v0.13/v0.14)
 
 最终状态：45 概念页 + 2 实体页 + 26 changelog，跟踪 hermes-agent v0.14.0
+
+## [2026-05-23] update | 同步 hermes-agent/master HEAD `874c2b1`（49 commits daily delta）
+
+- 对比基准: wiki master HEAD `2c31589`（2026-05-22 evening sync），hermes-agent/master HEAD `874c2b1`（2026-05-23 13:31 -0500）
+- 跨度 ~24 小时，49 commits，版本仍为 v0.14.0（未跨 minor）；验证基线 `/tmp/hermes-agent` clone @ `874c2b1`
+- **新建 changelog/2026-05-23-update.md**（按主题分 10 章 + 文件矩阵），所有 file:line 经 grep / Read 核对
+  - Nous Portal 一等公民（PR #30860, b4cf5b6）
+  - Kanban DB 抗污染（#30858 + #30862 + #30949 + #30952）
+  - Memory.md/USER.md 外部漂移防护（#30877 / #26045）
+  - 审批"沉默 ≠ 同意"契约（#30879 / #24912）
+  - TLS FD 回收三层防御（#29507）
+  - GHSA-5qr3-c538-wm9j 第二段 Plugin RCE（#29156）
+  - Gateway/Provider/平台细节修复簇（webhook INSECURE_NO_AUTH、telegram in-place edit、whatsapp JID/LID、qqbot intent+op7/9+SILK、opencode-go reasoning、xAI OAuth WKE）
+  - TUI 三连（composer burst / lifecycle log / late thinking deltas）
+  - Skills guard `--force` 文案纠偏
+- **更新 6 个 concept 页面**：
+  - cli-architecture.md — 新增 `hermes setup --portal` + `hermes portal` 三子命令章节 + 子命令表 + 文件索引；引 `portal_cli.py:39-181` + `setup.py:3063-3173` + `main.py:11877-11880`
+  - kanban-multi-agent-board.md — 新增"DB 抗污染"+"Scratch workspace 可见性"两节；引 `kanban_db.py:1010-1132`（`KanbanDbCorruptError` + `_guard_existing_db_is_healthy`）+ `:1029-1074` 备份硬化 + `:3109-3181` scratch tip
+  - memory-system-architecture.md — 安全扫描前插入"外部漂移防护"小节；引 `memory_tool.py:482-530 _detect_external_drift` 双信号 + `:108-130 _drift_error` + 三 mutator 拒绝路径
+  - security-defense-system.md — 末尾追加"v0.14 增量安全 wave (2026-05-23)" 4 小节（silence 契约 / Plugin RCE 双保险 / webhook 动态路由 INSECURE_NO_AUTH / skills_guard 文案）；引 `approval.py:1301-1330` + `web_server.py:4050,4547` + `webhook.py:329-339`
+  - interrupt-and-fault-tolerance.md — 新增"TLS FD 回收竞态三层防御"章节；引 `agent_runtime_helpers.py` shutdown-only + `chat_completion_helpers.py:97-141,1312-1345` thread-aware close
+  - messaging-gateway-architecture.md — Telegram 段加 `send_or_update_status` in-place edit；WhatsApp 段加 JID/LID alias；QQBot 段加 intent/op7-9/SILK 修复簇
+  - provider-plugin-system.md — 加 OpenCode Go reasoning controls 小节
+- **README.md / index.md** badge & changelog 索引：26 → 27 changelogs，"最后更新" 2026-05-22 → 2026-05-23，跟踪 HEAD 标注为 `874c2b1`
+- 验证策略: 每条结论都至少一条 grep / Read 命中源码；功能描述对照对应 PR 标题 + commit body + 实际 hunk 内容
+
