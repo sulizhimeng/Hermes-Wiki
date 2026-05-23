@@ -1,9 +1,9 @@
 ---
 title: Web Tools 搜索/提取架构
 created: 2026-04-08
-updated: 2026-05-17
+updated: 2026-05-19
 type: concept
-tags: [tool, toolset, architecture, component]
+tags: [tool, toolset, architecture, component, plugin]
 sources: [tools/web_tools.py, agent/web_search_provider.py, agent/web_search_registry.py, plugins/web/]
 ---
 
@@ -20,103 +20,111 @@ sources: [tools/web_tools.py, agent/web_search_provider.py, agent/web_search_reg
 
 ## 概述
 
-Web Tools 位于 `tools/web_tools.py`（~1551行），提供**多后端 Web 搜索/提取/爬取**能力。支持 7 种后端提供商，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
+Web Tools 提供**多后端 Web 搜索/提取/爬取**能力，所有后端对 Agent 暴露相同的 `web_search`、`web_extract`、`web_crawl` 工具接口。
+
+自 hermes 0.14.0 起，Web 后端被迁移为**插件架构**。旧的 `tools/web_providers/` 目录（及其 `tools.web_providers.base` ABC、`tools/web_tools.py` 内的逐厂商内联实现）已**整体删除**。当前结构：
+
+- `agent/web_search_provider.py` — `WebSearchProvider` 抽象基类（ABC），插件唯一对接面。
+- `agent/web_search_registry.py` — 全局注册表与活动后端解析。
+- `plugins/web/<name>/` — 各 provider 插件（内置，`kind: backend`，自动加载）。
+- `tools/web_tools.py`（67KB/1551 行）— 仅保留三个工具包装器、LLM 内容处理引擎、安全层；不再含任何厂商内联代码。
 
 核心理念：**内容获取优先于浏览器自动化**——简单信息检索使用 web_search/web_extract（更快、更便宜），仅在需要交互时才使用 browser 工具。
 
-> **v2026.5.x 重大重构**：所有搜索后端从 `tools/web_tools.py` 内联实现迁移为**插件**（`plugins/web/`）。旧的 `tools/web_providers/` 目录已删除。`web_tools.py` 现在只做工具壳层 + 安全 + LLM 压缩，后端解析全部通过 `agent/web_search_registry` 完成。详见下文「Provider 插件化」。
+## 插件架构
 
-## 架构原理
+### WebSearchProvider ABC
 
-### 七大后端
+定义于 `agent/web_search_provider.py:63`。子类必须实现 `name`（`agent/web_search_provider.py:75`）与 `is_available()`（`:90`），并实现 `search` / `extract` / `crawl` 中至少一个。能力标志位让注册表为每次调用路由到正确的 provider：
 
-| 后端 | Search | Extract | Crawl | 认证 |
-|---|---|---|---|---|
-| **Firecrawl** | ✅ | ✅ | ✅ | API Key 或 Nous Gateway |
-| **Exa** | ✅ | ✅ | ❌ | EXA_API_KEY |
-| **Parallel** | ✅ | ✅ | ❌ | PARALLEL_API_KEY |
-| **Tavily** | ✅ | ✅ | ✅ | TAVILY_API_KEY |
-| **brave-free** | ✅ | ❌ | ❌ | 免费 |
-| **ddgs** | ✅ | ❌ | ❌ | 免费 |
-| **searxng** | ✅ | ❌ | ❌ | SearXNG 实例 URL |
-
-所有后端均为 `plugins/web/` 下的插件。
-
-### Provider 注册架构
-
-新架构以 **`WebSearchProvider`** ABC（`agent/web_search_provider.py:63`）为核心。每个 provider 通过 `supports_search` / `supports_extract` / `supports_crawl` 能力标志声明自己支持的能力，多能力 provider（Firecrawl、Tavily、Exa）可从单个类同时通告多种能力。
-
-provider 实现打包为 `plugins/web/` 下的插件（`plugin.yaml` 声明 `kind: backend` 与 `provides_web_providers:`），通过 `ctx.register_web_search_provider()` 注册到 `agent/web_search_registry.py`。旧的 `tools/web_providers/` 目录已被删除。
-
-三个 web 工具不再直接通过 `_get_backend()`（该函数仍存在），而是经 `agent.web_search_registry` 的 `get_active_search_provider()` / `get_active_extract_provider()` / `get_active_crawl_provider()` 按能力路由。
-
-新增了**按能力的配置 key**：`web.search_backend` / `web.extract_backend` / `web.crawl_backend`，可分别覆盖各能力使用的后端。
-
-**ABC — `agent/web_search_provider.py`（221 行）**：`WebSearchProvider(abc.ABC)`
+| 方法 | 默认值 | 说明 |
+|---|---|---|
+| `supports_search()` | `True` | 实现 `search()` 时返回 True |
+| `supports_extract()` | `False` | 实现 `extract()` 时返回 True |
+| `supports_crawl()` | `False` | 实现 `crawl()` 时返回 True |
 
 ```python
-def _get_backend():
-    """解析优先级:
-    1. config.yaml web.backend (显式指定)
-    2. FIRECRAWL_API_KEY / FIRECRAWL_API_URL / tool-gateway
-    3. PARALLEL_API_KEY
-    4. TAVILY_API_KEY
-    5. EXA_API_KEY
-    6. 默认: firecrawl (向后兼容)
-    """
+def search(self, query: str, limit: int = 5) -> Dict[str, Any]: ...
+def extract(self, urls: List[str], **kwargs: Any) -> Any: ...
+def crawl(self, url: str, **kwargs: Any) -> Any: ...
 ```
 
-注意是**按能力**分别解析——search/extract/crawl 可以落在不同 provider 上。
+**async-extract 语义**：`extract()` 与 `crawl()` 均**可声明为 `async def`**。分发器通过 `inspect.iscoroutinefunction()` 检测协程并按需 `await`（`tools/web_tools.py:975`、`:1259`）。`is_available()` 必须是廉价检查（env 变量/可选依赖/实例 URL），**不得发起网络调用**——它在工具注册时及每次 `hermes tools` 刷新时运行。
 
-### 七个内置 Provider
+### register_web_search_provider() 门面
 
-`plugins/web/<name>/{plugin.yaml, __init__.py, provider.py}`，全部支持 search + extract：
+插件通过 `PluginContext.register_web_search_provider()`（`hermes_cli/plugins.py:585`）注册 provider 实例；该门面转发到 `agent.web_search_registry.register_provider()`。**插件是 Web provider 的唯一来源**——旧的硬编码 picker 行与 skiplist 已移除。
 
-| Provider | 类 | Crawl | Async extract |
-|---|---|---|---|
-| **firecrawl** | `FirecrawlWebSearchProvider` | ✅ | ✅ |
-| **tavily** | `TavilyWebSearchProvider` | ✅ | ❌ |
-| **parallel** | `ParallelWebSearchProvider` | ❌ | ✅ |
-| **exa** | `ExaWebSearchProvider` | ❌ | ❌ |
-| **searxng** | `SearXNGWebSearchProvider` | ❌ | ❌ |
-| **brave_free** | `BraveFreeWebSearchProvider` | ❌ | ❌ |
-| **ddgs** | `DDGSWebSearchProvider` | ❌ | ❌ |
+### 七大 Provider 插件
 
-用户可在 `~/.hermes/plugins/web/` 放同名插件覆盖内置实现。
+`plugins/web/` 下现有 7 个内置 provider 插件（`plugin.yaml` 中 `kind: backend`）：
 
-### Firecrawl 双路径架构
+| Provider | name | Search | Extract | Crawl | 认证 / 依赖 |
+|---|---|---|---|---|---|
+| **Firecrawl** | `firecrawl` | ✅ | ✅ (async) | ✅ (async) | API Key 或 Nous Tool Gateway |
+| **Tavily** | `tavily` | ✅ | ✅ | ✅ | `TAVILY_API_KEY` |
+| **Exa** | `exa` | ✅ | ✅ | ❌ | `EXA_API_KEY` |
+| **Parallel** | `parallel` | ✅ | ✅ (async) | ❌ | `PARALLEL_API_KEY` |
+| **SearXNG** | `searxng` | ✅ | ❌ | ❌ | `SEARXNG_URL`（自托管实例） |
+| **Brave (Free)** | `brave-free` | ✅ | ❌ | ❌ | `BRAVE_SEARCH_API_KEY`（免费层） |
+| **DDGS** | `ddgs` | ✅ | ❌ | ❌ | 无 Key，需 `ddgs` Python 包 |
 
-Firecrawl 插件保留两种连接模式，由 `web.use_gateway` 配置控制（两套凭证都存在时选哪个）：
+**Crawl 仅 Firecrawl 与 Tavily 支持**（`agent/web_search_registry.py:251`）。注意差异：Tavily 的 crawl 支持自然语言 `instructions`；Firecrawl 的 `/crawl` 端点不接受 instructions（属 `/extract` 功能），其插件会记录并丢弃该参数（`plugins/web/firecrawl/provider.py:610`）。
 
-| 模式 | 路径 / 环境变量 | 适用对象 |
+### 注册表分发路径
+
+`tools/web_tools.py` 的三个工具包装器不再含厂商逻辑，仅做注册表查找 + 委派：
+
+```
+web_search_tool   → _get_search_backend() → web_search_registry.get_provider()
+                    → 回退 get_active_search_provider()  → provider.search()
+web_extract_tool  → get_active_extract_provider()        → provider.extract()  [可 await]
+web_crawl_tool    → get_active_crawl_provider()          → provider.crawl()    [可 await]
+```
+
+### 活动后端解析
+
+`_resolve()`（`agent/web_search_registry.py:133`）按以下优先级选定活动 provider：
+
+1. 显式配置 `web.<capability>_backend`（`search_backend` / `extract_backend` / `crawl_backend`）。
+2. 共享回退 `web.backend`。
+3. **单 provider 捷径**：当某能力恰有一个已注册且 `is_available()` 的 provider 时直接选用。
+4. **遗留偏好顺序**（按可用性过滤）：`firecrawl → parallel → tavily → exa → searxng → brave-free → ddgs`，与迁移前 `_get_backend()` 顺序一致——付费后端在前，确保升级后既有付费配置不会被降级到免费层。
+5. 否则返回 `None`，工具向用户报错并指引 `hermes tools`。
+
+每一步都施加能力过滤（`supports_search/extract/crawl`），因此把仅支持搜索的 provider（如 `brave-free`）配为 `web.extract_backend` 会正确穿透到具备 extract 能力的后端。注意：**显式配置即使 `is_available()` 为 False 也会被选中**，以便分发器给出精确的「X_API_KEY 未设置」错误而非静默切换。
+
+### Firecrawl 双路径认证
+
+Firecrawl 是默认后端，支持两种连接模式（`plugins/web/firecrawl/provider.py:205` `_get_firecrawl_client`）：
+
+| 模式 | 配置 | 适用对象 |
 |---|---|---|
-| **直接模式** | `FIRECRAWL_API_KEY` / `FIRECRAWL_API_URL` | 所有用户 |
-| **托管 Gateway** | Nous 托管的 tool-gateway（`FIRECRAWL_GATEWAY_URL` / `TOOL_GATEWAY_*`） | Nous 订阅者 |
+| **直接模式** | `FIRECRAWL_API_KEY` / `FIRECRAWL_API_URL`（自托管） | 所有用户 |
+| **托管 Gateway** | Nous Tool Gateway（`FIRECRAWL_GATEWAY_URL` / `TOOL_GATEWAY_*`） | Nous 订阅者 |
 
-`plugins/web/firecrawl/provider.py`（773 行）的 `_get_firecrawl_client()` + `_is_tool_gateway_ready()` 实现该判定，客户端按配置缓存。**优越性**：Nous 订阅者无需单独购买 Firecrawl。
+当两者均配置时，`web.use_gateway: true` 会优先走托管 Gateway，否则直接模式优先（`provider.py:226`）。`check_firecrawl_api_key()` 在任一路径可用时返回 True。客户端实例被缓存在 `tools.web_tools` 模块上（`_firecrawl_client` / `_firecrawl_client_config`），配置不变时复用。
 
-## 核心组件
+**优越性**：Nous 订阅者无需单独购买 Firecrawl，通过 tool-gateway 共享访问。
 
-`tools/web_tools.py` 中的三个工具入口现在都是**注册表查找 + 委派**——具体后端逻辑全部在 `plugins/web/<name>/provider.py` 中。
+## 核心工具
 
-### 1. web_search_tool — 网络搜索
+### web_search_tool — 网络搜索
 
 ```python
 def web_search_tool(query: str, limit: int = 5) -> str:
-    # 通过 agent.web_search_registry 分发:
-    #   backend = _get_search_backend()
-    #   provider = get_provider(backend) 或 fallback get_active_search_provider()
-    #   response = provider.search(query, limit)
 ```
 
-所有 7 个 provider 的 `search()` 均为同步实现。返回统一格式：`{"success": true, "data": {"web": [{"title", "url", "description", "position"}]}}`。无 provider 时返回错误，提示运行 `hermes tools`。
+`limit` 被钳制到 1–100。返回统一格式：
+`{"success": true, "data": {"web": [{"title", "url", "description", "position"}]}}`。
+所有 provider 的 `search()` 均为同步实现。
 
-### 2. web_extract_tool — URL 内容提取
+### web_extract_tool — URL 内容提取
 
 ```python
 async def web_extract_tool(
     urls: List[str],
-    format: str = "markdown",      # markdown 或 html
+    format: str = None,            # markdown 或 html，None 时由 provider 决定
     use_llm_processing: bool = True,
     model: Optional[str] = None,
     min_length: int = 5000         # 触发 LLM 处理的最小长度
@@ -124,57 +132,55 @@ async def web_extract_tool(
 ```
 
 **核心流程**：
-1. 安全检查（密钥注入 + SSRF + 网站策略）
-2. 注册表解析活跃 extract provider，调用 `provider.extract(urls, **kwargs)`——分发器用 `inspect.iscoroutinefunction` 检测并按需 `await`（Parallel 的 SDK 原生异步，Exa/Tavily/Firecrawl 同步）
+1. 安全检查（密钥注入 + SSRF `is_safe_url()` + 网站策略）
+2. 后端提取——注册表选定的 provider 的 `extract()`（同步或 `await`）
 3. LLM 智能压缩（`process_content_with_llm`）
-4. 输出裁剪（只保留 url/title/content/error）
+4. 输出裁剪 + `clean_base64_images()`
 
-provider 的 `extract()` 返回统一的 `[{"url", "title", "content", "raw_content", "metadata"?, "error"?}, ...]` 列表。
-
-### 3. web_crawl_tool — 网站爬取
+### web_crawl_tool — 网站爬取
 
 ```python
 async def web_crawl_tool(
     url: str,
-    instructions: str = None,    # 提取指令（仅 Tavily 支持）
+    instructions: str = None,    # 自然语言提取指令（仅 Tavily 支持）
     depth: str = "basic",        # basic 或 advanced
-    use_llm_processing: bool = True
+    use_llm_processing: bool = True,
+    model: Optional[str] = None,
+    min_length: int = 5000
 ) -> str:
 ```
 
-仅 **firecrawl** 和 **tavily** 的 provider 声明 `supports_crawl()=True`。分发逻辑：
-- 配置的后端支持 crawl → 通过注册表 `get_active_crawl_provider()` 调用 `provider.crawl()`（同步/异步均可）
-- 配置的后端 search-only（brave-free/ddgs/searxng，连 extract 也不支持）→ 返回 typed "search-only" 错误
-- provider 被配置但不可用（如缺 `FIRECRAWL_API_KEY`）→ 提前短路返回顶层错误信封
-
-crawl provider 返回 `{"results": [{"url", "title", "content", ...}]}`，再交由共享的 LLM 摘要后处理。
+分发器先对种子 URL 做 SSRF + 网站策略校验，再委派给 `get_active_crawl_provider()`。当无 crawl-capable provider 时，分发器回退到辅助模型摘要路径。
 
 ## LLM 内容处理引擎
 
-这是 Web Tools 最具创新性的部分——用 LLM 自动压缩网页内容。
+这是 Web Tools 最具创新性的部分——用 LLM 自动压缩网页内容（`process_content_with_llm`，`tools/web_tools.py:320`）。
 
 ### 处理策略
 
+源码常量（`tools/web_tools.py:348`）：
+
 ```python
-def process_content_with_llm(content, url, title, model, min_length):
-    """
-    内容分级处理:
-    < 5000 chars → 跳过处理，直接返回原始内容
-    5000 ~ 500K chars → 单次 LLM 摘要
-    500K ~ 2M chars → 分块处理 + 合成
-    > 2M chars → 拒绝处理
-    """
+MAX_CONTENT_SIZE = 2_000_000   # 2M chars — 超过则完全拒绝
+CHUNK_THRESHOLD  = 500_000     # 500k chars — 超过则分块处理
+CHUNK_SIZE       = 100_000     # 每块 100k chars
+MAX_OUTPUT_SIZE  = 5000        # 最终输出硬上限
+DEFAULT_MIN_LENGTH_FOR_SUMMARIZATION = 5000  # 低于此值跳过处理
 ```
+
+- `< 5000 chars` → 跳过处理，直接返回原始内容
+- `5000 ~ 500K chars` → 单次 LLM 摘要
+- `500K ~ 2M chars` → 分块处理 + 合成
+- `> 2M chars` → 拒绝处理
 
 ### 分块处理（Chunked Processing）
 
-```python
-async def _process_large_content_chunked(content, chunk_size=100K):
-    # 1. 将内容切分为 100K chars 的块
-    # 2. 并行摘要每个块 (asyncio.gather)
-    # 3. 合成所有块摘要为统一摘要
-    # 4. 硬性限制: 最终输出 ≤ 5000 chars
-```
+`_process_large_content_chunked`（`tools/web_tools.py:538`）：
+
+1. 将内容切分为 100K chars 的块
+2. 并行摘要每个块（`asyncio.gather`）
+3. 合成所有块摘要为统一摘要
+4. 硬性限制：最终输出 ≤ 5000 chars
 
 **设计亮点**：
 - 每个块使用**专门的 prompt**（"这是大文档的一节，不要写引言和结论"）
@@ -182,52 +188,24 @@ async def _process_large_content_chunked(content, chunk_size=100K):
 - 合成步骤**去除冗余**并整合为连贯摘要
 - 如果合成失败，**回退为拼接所有块摘要**
 
-### 压缩率
-
-典型压缩比：10-50x（原始内容 → LLM 摘要）
-
-```
-原始: 50,000 chars → 处理后: 2,000 chars (4%)
-原始: 200,000 chars → 处理后: 4,500 chars (2.25%)
-```
-
 ## 安全设计
-
-### 四层防护
 
 | 层级 | 保护 | 实现 |
 |---|---|---|
-| **URL 密钥注入** | 阻止 URL 中嵌入 API Key | `_PREFIX_RE` 检测 |
-| **SSRF 防护** | 阻止访问私有地址 | `is_safe_url()` |
-| **网站策略** | 黑名单域名拦截 | `check_website_access()` |
-| **重定向检查** | 阻止重定向到内部地址 | 提取后检查 `sourceURL` |
+| **URL 密钥注入** | 阻止 URL 中嵌入 API Key | 提取前检查嵌入密钥 |
+| **SSRF 防护** | 阻止访问私有地址 | `is_safe_url()`（`tools/url_safety.py`） |
+| **网站策略** | 黑名单域名拦截 | `check_website_access()`（`tools/website_policy.py`） |
+| **重定向检查** | 阻止重定向到内部地址 | provider 提取后按 `sourceURL` 重新校验策略 |
+
+策略校验下沉到各 provider 插件：Firecrawl 插件在抓取前后、爬取每页时都重新调用 `check_website_access()`，命中时返回带 `blocked_by_policy` 字段的结果项而非抛异常。
 
 ### Base64 图片清理
 
 ```python
 def clean_base64_images(text: str) -> str:
-    """移除 base64 编码图片，替换为 [BASE64_IMAGE_REMOVED]"""
+    """移除 base64 编码图片，替换为占位符"""
     # 防止大量 base64 数据挤占上下文窗口
 ```
-
-## 标准化层
-
-不同后端返回不同的数据格式。每个 provider 在其插件模块内部完成标准化，使所有后端对外暴露 ABC 中定义的统一响应形状。重构后这些 vendor helper 已从 `web_tools.py` 移入各插件，再由 `web_tools.py` 重新 import 以保持兼容：
-
-```python
-# plugins/web/firecrawl/provider.py
-_extract_web_search_results(response)    # Firecrawl 多格式提取
-_to_plain_object(value)                  # SDK 对象 → Python dict
-_normalize_result_list(values)           # 混合 SDK/list → dict list
-
-# plugins/web/tavily/provider.py
-_normalize_tavily_search_results(raw)    # Tavily → 标准格式
-_normalize_tavily_documents(raw)         # Tavily extract/crawl → 标准格式
-```
-
-`WebSearchProvider` ABC 把响应形状契约写进文档并逐位保留旧的 in-tree 契约，因此工具 wrapper 无需做任何翻译。
-
-**优越性**：Agent 永远收到统一格式的数据，不需要根据后端类型做不同的解析。
 
 ## Debug 模式
 
@@ -235,34 +213,7 @@ _normalize_tavily_documents(raw)         # Tavily extract/crawl → 标准格式
 export WEB_TOOLS_DEBUG=true
 ```
 
-启用后自动记录：
-- 所有工具调用及参数
-- 原始 API 响应
-- LLM 压缩指标（原始大小/处理后大小/压缩比）
-- 最终处理结果
-
-日志保存到：`~/.hermes/logs/web_tools_debug_UUID.json`
-
-## 设计优越性
-
-### 对比直接调用 API
-
-| 维度 | 直接调用 API | Web Tools |
-|---|---|---|
-| 后端切换 | 需要改代码 | config.yaml 一键切换 |
-| 内容压缩 | 手动处理 | 自动 LLM 摘要 |
-| 大内容处理 | 容易超上下文 | 分块 + 合成 |
-| 安全防护 | 需要自己实现 | SSRF + 注入 + 策略三层防护 |
-| 格式统一 | 每个 API 格式不同 | 统一输出格式 |
-| 调试 | 需要手动打印 | 内置 Debug 模式 |
-
-### LLM 处理的优越性
-
-没有 LLM 处理时，Agent 收到的是原始 HTML/markdown 全文（可能数十万字）。有了 LLM 处理后：
-- **上下文节省**：压缩 10-50x
-- **信息密度提升**：只保留关键事实和数据
-- **格式统一**：所有页面都是结构化 Markdown 摘要
-- **优雅降级**：LLM 失败时回退为截断原始内容
+启用后通过 `DebugSession`（`tools/web_tools.py:317`）记录所有工具调用、参数、响应大小、LLM 压缩指标与最终结果。
 
 ## 配置与操作
 
@@ -271,38 +222,28 @@ export WEB_TOOLS_DEBUG=true
 ```yaml
 # config.yaml
 web:
-  backend: firecrawl          # 共享 fallback (firecrawl/parallel/tavily/exa/searxng/brave-free/ddgs)
-  search_backend: searxng     # 可选: 仅 web_search 用此后端
-  extract_backend: firecrawl  # 可选: 仅 web_extract 用此后端
-  crawl_backend: tavily       # 可选: 仅 web_crawl 用此后端
+  backend: firecrawl         # 共享回退：所有能力
+  search_backend: searxng    # 可选：仅 web_search 用 SearXNG
+  extract_backend: firecrawl # 可选：仅 web_extract 用 Firecrawl
+  crawl_backend: tavily      # 可选：仅 web_crawl 用 Tavily
+  use_gateway: false         # Firecrawl 双路径时优先托管 Gateway
 ```
 
-per-capability 键允许搜索与提取使用不同后端（例如 SearXNG 搜索 + Firecrawl 提取）。
+推荐通过 `hermes tools` 交互式配置（picker 行由各插件的 `get_setup_schema()` 动态生成）。
 
 ### 环境变量
 
 ```bash
 # Firecrawl 直接模式
 export FIRECRAWL_API_KEY=fc-xxx
-export FIRECRAWL_API_URL=https://your-self-hosted.com  # 可选
-
-# Exa
-export EXA_API_KEY=exa-xxx
-
-# Parallel
-export PARALLEL_API_KEY=par-xxx
-
-# Tavily
+export FIRECRAWL_API_URL=https://your-self-hosted.com   # 自托管，可选
+# Tavily / Exa / Parallel
 export TAVILY_API_KEY=tav-xxx
-
-# SearXNG (自托管 metasearch)
+export EXA_API_KEY=exa-xxx
+export PARALLEL_API_KEY=par-xxx
+# SearXNG / Brave (Free)
 export SEARXNG_URL=https://your-searxng-instance
-
-# Brave Search (免费层, 2k 查询/月)
 export BRAVE_SEARCH_API_KEY=brave-xxx
-
-# ddgs (DuckDuckGo) — 无需 Key, 仅需安装包
-
 # LLM 处理配置
 export AUXILIARY_WEB_EXTRACT_MODEL=google/gemini-3-flash-preview
 ```
@@ -314,10 +255,17 @@ export AUXILIARY_WEB_EXTRACT_MODEL=google/gemini-3-flash-preview
 content = await web_extract_tool(["https://example.com"], use_llm_processing=False)
 ```
 
+## 设计优越性
+
+- **可插拔后端**：新增 provider 只需在 `plugins/web/` 下放一个实现 `WebSearchProvider` ABC 的插件，无需改动 `web_tools.py`。
+- **按能力分路由**：search / extract / crawl 可分别配置不同后端。
+- **内容压缩**：自动 LLM 摘要 + 大内容分块合成，节省上下文窗口。
+- **安全防护**：SSRF + 密钥注入 + 网站策略 + 重定向重检。
+- **格式统一**：所有 provider 遵守同一响应契约，Agent 永远收到统一格式。
+
 ## 与其他系统的关系
 
-- [[mcp-and-plugins]] — 七大 Web 后端均为 `kind: backend` 内置插件，通过 `ctx.register_web_search_provider()` facade 注册
-- [[auxiliary-client-architecture]] — LLM 内容处理通过 `async_call_llm(task="web_extract")` 调用
-- [[tool-registry-architecture]] — web_search/web_extract 通过 registry 注册
+- [[auxiliary-client-architecture]] — LLM 内容处理通过辅助客户端调用摘要模型
+- [[tool-registry-architecture]] — web_search/web_extract/web_crawl 通过 registry 注册
 - [[browser-tool-architecture]] — 文档建议简单信息获取优先用 web_tools
 - [[context-compressor-architecture]] — 类似的 LLM 压缩理念应用于不同场景

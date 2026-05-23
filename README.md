@@ -3,8 +3,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
-  <img src="https://img.shields.io/badge/Knowledge_Base-37_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v0.14.0-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Knowledge_Base-38_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
+  <img src="https://img.shields.io/badge/Version-v2026.5.16-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -64,12 +64,13 @@
 - [kanban-system](concepts/kanban-system.md): 持久化 SQLite 协作看板，跨进程多 worker，dispatcher/orchestrator/诊断引擎
 - [goals-and-ralph-loop](concepts/goals-and-ralph-loop.md): `/goal` 跨轮次持久目标，judge 模型驱动的 Ralph Loop
 - [configuration-and-profiles](concepts/configuration-and-profiles.md): 多 Profile 架构，完全隔离的 agent 实例（第二种多 Agent 方案）
+- [kanban-orchestration](concepts/kanban-orchestration.md): 持久化多 Profile 协作看板，9 状态机 + Gateway 调度器 + Orchestrator 自动分解 + 并发上限/Respawn 守卫
 
 ### 平台与扩展
 
 - [cli-architecture](concepts/cli-architecture.md): CLI 架构、斜杠命令、hermes dump
 - [terminal-backends](concepts/terminal-backends.md): 7 种终端后端（含 Vercel Sandbox）、统一 spawn-per-call 执行模型
-- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 23 平台统一网关（18 内置 + 5 插件，含 SimpleX/Teams/IRC/腾讯元宝/QQ Bot），平台适配器插件化（PlatformRegistry）、代理模式、channel_prompts、角色权限
+- [messaging-gateway-architecture](concepts/messaging-gateway-architecture.md): 24 个平台统一网关（19 内置 + 5 插件：IRC/LINE/Google Chat/MS Teams/SimpleX，含 MS Graph webhook/腾讯元宝/微信/QQ Bot），平台适配器插件化（PlatformRegistry）、代理模式、channel_prompts、角色权限
 - [gateway-session-management](concepts/gateway-session-management.md): 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
 - [hook-system-architecture](concepts/hook-system-architecture.md): 双 Hook 系统（Gateway Hooks + Plugin System），register_command/dispatch_tool，Dashboard 插件
 - [mcp-and-plugins](concepts/mcp-and-plugins.md): MCP 集成、插件钩子系统、OAuth 支持
@@ -85,17 +86,17 @@
 - [2026-04-17-update](changelog/2026-04-17-update.md): 641 commits (v0.10.0)，压缩 v3、Bedrock/Gemini/Ollama 新 Provider、Tool Gateway、插件命名空间技能、钉钉 QR 认证、Dashboard 插件
 - [2026-04-18-update](changelog/2026-04-18-update.md): 410 commits post-v0.10.0，Transport ABC 重构、Shell Hooks、Delegate Orchestrator、Step Plan/AI Gateway/xAI STT/KittenTTS、WeCom QR、Subagent 观测性
 - [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
-- [2026-05-18-update](changelog/2026-05-18-update.md): 285 commits (v0.14.0)，`run_agent.py` 大重构（12 模块抽取）、session_search 单形态无 LLM 重写、浏览器 Provider 插件化、辅助客户端分层 fallback ladder、xAI Grok OAuth/Azure Foundry/NVIDIA NIM、压缩 abort-on-summary-failure、Gateway deliverable 模式、`hermes send`、Cron job profile、Atropos RL 移除
+- [2026-05-19-update](changelog/2026-05-19-update.md): 2418 commits（v2026.4.23 → v2026.5.16），run_agent 大重构（10+ helpers 抽出到 agent/*.py）、Web/Browser/Model Providers 全面插件化、**Kanban 编排系统**、/goal Ralph loop、/handoff 跨平台、Checkpoints v2 单存储、session_search 单形态、16 语言 i18n、Skill Bundles、5 个新插件平台、xAI/Novita/Azure Foundry/x_search 等 Provider
 
 ---
 
 ## 统计信息
 
-- **概念页面**: 37 个
+- **概念页面**: 38 个
 - **更新日志**: 6 个
 - **源码覆盖**: 关键模块逐行验证
-- **跟踪版本**: v0.14.0
-- **最后更新**: 2026-05-18
+- **跟踪版本**: v2026.5.16（hermes-agent 0.14.0）
+- **最后更新**: 2026-05-19
 
 
 ## 使用方式

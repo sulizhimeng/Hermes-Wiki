@@ -123,26 +123,23 @@
   - 核心内容: Gateway Hooks 事件驱动(8种事件+通配符)，Plugin System 三级来源(用户/项目/pip)，PluginContext API(工具注册/消息注入/CLI命令/钩子)，缓存友好上下文注入
 - index.md 更新为 37 页
 
-## [2026-05-18] update | 同步 hermes-agent v0.14.0（285 commits，2026-04-30 ~ 2026-05-18）
-拉取 NousResearch/hermes-agent 最新源码（HEAD 2026-05-18），与 wiki 逐项对照，所有结论经 5 个并行子代理逐行源码验证：
+## [2026-05-19] update | hermes-agent v2026.4.23 → v2026.5.16 全量同步（2418 commits）
+对照 `/tmp/hermes-agent` HEAD `2b41f9d`（2026-05-19, hermes-agent 0.14.0, tag v2026.5.16）逐文件验证：
 
-**新建更新日志:**
-- changelog/2026-05-18-update.md — 285 commits (v0.14.0)
+**重构与插件化（5 个 concept 页更新）**
+- `agent-loop-and-prompt-assembly.md` + `entities/aiagent-class.md`: run_agent.py 拆分到 agent/*.py，AIAgent.__init__ 60+ 参数；system_prompt.py:60 三层结构；TOOL_USE_ENFORCEMENT_MODELS 扩展到 8 种；codex_app_server 运行时
+- `web-tools-architecture.md`: WebSearchProvider ABC + web_search_registry + 7 个 plugins/web 插件（firecrawl/tavily/exa/parallel/searxng/brave_free/ddgs），tools/web_providers/ 已删除
+- `browser-tool-architecture.md`: BrowserProvider ABC + browser_registry + 3 个 plugins/browser 插件，tools/browser_providers/ 已删除，Lightpanda + Camofox 外部托管会话
+- `provider-transport-architecture.md` + `auxiliary-client-architecture.md`: ProviderProfile ABC + 30 个 plugins/model-providers/ 目录；4-entry fallback chain + 600s 不健康缓存
+- `messaging-gateway-architecture.md`: 24 个平台（19 内置 + 5 插件：IRC/LINE/Google Chat/MS Teams/SimpleX），新增 msgraph_webhook
 
-**更新页面 (16):**
-- agent-loop-and-prompt-assembly / aiagent-class — `run_agent.py` 大重构（12 模块抽取到 agent/），系统提示三层模型（stable/context/volatile），日期精度时间戳，grok 纳入 OpenAI 执行指导
-- session-search-and-sessiondb — session_search 单形态无 LLM 重写（#27590），三模式 DISCOVERY/SCROLL/BROWSE
-- browser-tool-architecture — 浏览器 Provider 插件化，BrowserProvider ABC（5 抽象成员），agent/browser_registry.py
-- context-compressor-architecture — abort-on-summary-failure（#28102/#28117），_strip_historical_media（#27189），conversation_compression.py 模块
-- auxiliary-client-architecture — 分层 fallback ladder，配额耗尽视为 payment error，文件 5286 行
-- smart-model-routing — xAI Grok OAuth / Azure Foundry Entra ID / NVIDIA NIM
-- credential-pool-and-isolation — OAuth 死 token 隔离，Nous invoke JWT
-- interrupt-and-fault-tolerance — FailoverReason 13→19，xAI entitlement SSE 分类，credential_pool 路径修正
-- cron-scheduling — cron job profile 支持
-- mcp-and-plugins / parallel-tool-execution — MCP supports_parallel_tool_calls
-- cli-architecture — `hermes send` 子命令，`/sessions` 接线
-- messaging-gateway-architecture — deliverable 模式，SUPPORTED_DOCUMENT_TYPES
-- toolsets-system — x_search 凭证自动启用
-- trajectory-and-data-generation — 移除 Atropos RL（environments/ 已删除，#26106）
+**新建页面 (1)**
+- `kanban-orchestration.md` — 持久化多 Profile 协作看板，hermes_cli/kanban*.py + tools/kanban_tools.py + plugins/kanban/dashboard，9 状态机，Gateway 调度器 + Orchestrator 自动分解 + Respawn 守卫
 
-- README.md / index.md 同步版本号 v0.14.0、changelog 计数 6、日期 2026-05-18
+**新增 changelog**
+- `changelog/2026-05-19-update.md` —— 17 节，2418 commits 总结
+
+**统计**
+- index.md 更新为 38 页
+- README 版本徽章 v2026.4.23 → v2026.5.16，平台数 18+ → 24
+- 跟踪版本：hermes-agent 0.14.0

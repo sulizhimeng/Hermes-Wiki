@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-05-18 | Total pages: 39
+> Last updated: 2026-05-19 | Total pages: 38
 
 ## Entities
 
@@ -36,9 +36,8 @@
 - [[security-defense-system]] — 多层防御 + Redaction 默认 ON + Discord guild-scoped + post-write delta lint
 - [[interrupt-and-fault-tolerance]] — 中断传播、Fallback 模型链
 - [[credential-pool-and-isolation]] — 多密钥自动轮换、Profile 隔离
-- [[multi-agent-architecture]] — 多 Agent 体系，5 种运行时机制（delegate/MoA/Background Review/send_message/Kanban）
-- [[kanban-system]] — 持久化 SQLite 协作看板，跨进程多 worker，dispatcher/orchestrator/诊断引擎
-- [[goals-and-ralph-loop]] — `/goal` 跨轮次持久目标，judge 模型驱动的 Ralph Loop
+- [[multi-agent-architecture]] — 多 Agent 体系，子代理委派+批量处理+跨平台通信
+- [[kanban-orchestration]] — 持久化多 Profile 协作看板（v2026.5+），Gateway 调度器+Orchestrator 自动分解+9 状态机+并发上限
 
 ### 平台与扩展
 - [[cli-architecture]] — CLI 架构、斜杠命令补全、Skin 引擎

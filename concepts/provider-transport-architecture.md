@@ -1,19 +1,23 @@
 ---
 title: Provider Transport 架构
 created: 2026-04-18
-updated: 2026-05-17
+updated: 2026-05-19
 type: concept
-tags: [architecture, module, provider, transport, api-dispatch]
-sources: [agent/transports/base.py, agent/transports/anthropic.py, agent/transports/chat_completions.py, agent/transports/bedrock.py, agent/transports/codex.py, agent/transports/codex_app_server.py, agent/transports/types.py, agent/transports/__init__.py, run_agent.py]
+tags: [architecture, module, provider, transport, api-dispatch, plugin]
+sources: [agent/transports/base.py, agent/transports/anthropic.py, agent/transports/chat_completions.py, agent/transports/bedrock.py, agent/transports/codex.py, agent/transports/codex_app_server.py, agent/transports/types.py, agent/transports/__init__.py, agent/codex_runtime.py, providers/base.py, providers/__init__.py, plugins/model-providers/, run_agent.py]
 ---
 
 # Provider Transport — API 路径统一抽象
 
 ## 概述
 
-Provider Transport 是 **v2026.4.17+** 引入的架构级重构，用统一的 ABC 抽象了所有 provider 的 API 数据路径（Anthropic Messages、OpenAI Chat Completions、OpenAI Responses API、AWS Bedrock）。位于 `agent/transports/`（约 3303 行），替代了之前散落在 `run_agent.py` 各处的 `if api_mode == "anthropic_messages": ... elif ...` 分支判断。
+Provider Transport（v2026.4.17+ 引入）用统一的 ABC 抽象了所有 provider 的 API 数据路径（Anthropic Messages、OpenAI Chat Completions、OpenAI Responses API、AWS Bedrock）。位于 `agent/transports/`，替代了之前散落在 `run_agent.py` 各处的 `if api_mode == "anthropic_messages": ... elif ...` 分支判断。
 
-**核心理念**：**一个 provider 的消息转换、工具转换、参数构建、响应规范化，应该聚合在一个类里，而不是散落在调用点。**
+到 v0.14.0（HEAD 2026-05-19），这个架构已与**第二层抽象 `ProviderProfile`** 配合：transport 负责*协议路径*（按 `api_mode` 分四类），`ProviderProfile` 负责*单个 provider 的声明式配置与 quirk*。~33 个 provider 全部下沉为 `plugins/model-providers/<name>/` 下的可插拔插件。
+
+**核心理念**：
+- **Transport**：一个 provider 的消息转换、工具转换、参数构建、响应规范化，应该聚合在一个类里，而不是散落在调用点。
+- **ProviderProfile**：一个 provider 的 auth、端点、客户端 quirk、请求 quirk，应该声明在一个数据类里，而不是把 20+ 个 boolean flag 传进 transport。
 
 > **2026-05 二阶重构**：`providers/` 模块（`ProviderProfile` ABC）补全了"哪个 provider"那一半。Transport 管 `api_mode`（数据路径），Provider Profile 管 provider 身份/auth/endpoint/quirks/aux defaults，**两者正交**。33 个 provider profile 全部以 `plugins/model-providers/<name>/` 形式发布。详见下方"Provider Profile 插件系统"。
 
@@ -59,30 +63,36 @@ class ProviderTransport(ABC):
 
 | Transport | 文件 | 行数（v0.12.0） | api_mode | 覆盖 |
 |-----------|------|------|----------|------|
-| `AnthropicTransport` | `transports/anthropic.py` | 179 | `anthropic_messages` | Claude（直连、Nous Portal） |
-| `ChatCompletionsTransport` | `transports/chat_completions.py` | 614 | `chat_completions`、`openai` 等 | OpenAI、OpenRouter、Gemini、xAI、custom OpenAI 兼容 |
-| `ResponsesApiTransport` | `transports/codex.py` | 283 | `codex_responses` | OpenAI Codex、Responses API |
+| `AnthropicTransport` | `transports/anthropic.py` | 179 | `anthropic_messages` | Claude（直连、OAuth、Nous Portal） |
+| `ChatCompletionsTransport` | `transports/chat_completions.py` | 614 | `chat_completions` | ~16 个 OpenAI 兼容 provider（OpenRouter、Nous、Gemini、DeepSeek、NVIDIA、Qwen、Ollama、Kimi、Novita、Azure Foundry 等） |
+| `ResponsesApiTransport` | `transports/codex.py` | 283 | `codex_responses` | OpenAI Codex、xAI Grok（Responses API） |
 | `BedrockTransport` | `transports/bedrock.py` | 154 | `bedrock_converse` | AWS Bedrock（Converse API） |
-| `NormalizedResponse` | `transports/types.py` | 162 | — | 共享响应类型 |
+| `NormalizedResponse` 等 | `transports/types.py` | 162 | — | 共享响应类型（`NormalizedResponse`、`ToolCall`、`Usage`） |
 | 基类 + 注册表 | `transports/base.py` + `__init__.py` | 89 + 68 | — | ABC + `get_transport()` 惰性发现 |
 
-#### codex app-server 运行时模块（新增）
+> 注意：实际 `api_mode` 字符串是 `anthropic_messages`、`chat_completions`、`codex_responses`、`bedrock_converse`（见各 transport 文件末尾的 `register_transport(...)` 调用）。
 
-除上述核心 transport 外，`transports/` 目录还包含一组支撑 `codex app-server` 子进程运行时的新模块：
+### Codex App Server 运行时（可选）
+
+除上述四个数据路径 transport 外，`agent/transports/` 还有一组 **Codex App Server** 文件——一个 *runtime*（非 transport ABC 子类），当用户的活跃 provider 是本地 `codex` CLI 安装时启用：
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `transports/codex_app_server.py` | 399 | `codex app-server` 子进程客户端基础设施 |
-| `transports/codex_app_server_session.py` | 810 | 单轮会话驱动（`CodexAppServerSession`） |
-| `transports/codex_event_projector.py` | 312 | 把 app-server 事件投影为 Hermes 内部事件 |
-| `transports/hermes_tools_mcp_server.py` | 233 | 把 Hermes 工具暴露为 MCP server 供 codex_app_server 运行时使用 |
+| `transports/codex_app_server.py` | 399 | `CodexAppServerClient`——驱动 `codex app-server` 子进程 |
+| `transports/codex_app_server_session.py` | 810 | `CodexAppServerSession`——每个 `AIAgent` 一个会话，跨 turn 复用 |
+| `transports/codex_event_projector.py` | 312 | 把 codex 事件投影回 Hermes 的 messages 列表 |
+| `transports/hermes_tools_mcp_server.py` | 233 | 把 Hermes 工具暴露给 codex 子进程的 MCP server |
+| `agent/codex_runtime.py` | 448 | `run_codex_app_server_turn` / `run_codex_stream` / `run_codex_create_stream_fallback`——从 `AIAgent` 抽出的 Codex 运行时函数 |
+
+`codex_runtime.py` 的每个函数以 `agent`（父 `AIAgent`）为首参，`AIAgent` 保留薄转发方法做向后兼容。`run_codex_app_server_turn` 在 `agent.api_mode == "codex_app_server"` 时由 `run_conversation()` 调用，返回与 chat_completions 路径相同形状的 dict。
 
 ### 注册表：惰性发现
 
 ```python
 # agent/transports/__init__.py
-def get_transport(api_mode: str) -> ProviderTransport:
-    """按需 import 对应的 transport 模块，触发模块级 register_transport() 调用"""
+def get_transport(api_mode: str):
+    """按需 import 对应的 transport 模块，触发模块级 register_transport() 调用。
+    未注册时返回 None——调用点可检查 None 并回退到 legacy 路径。"""
     ...
 
 def register_transport(api_mode: str, transport_cls: type) -> None:
@@ -90,7 +100,101 @@ def register_transport(api_mode: str, transport_cls: type) -> None:
     ...
 ```
 
-首次 `get_transport("anthropic_messages")` 调用时才 import `transports/anthropic.py`——**延迟到实际使用**，启动不会因为 import 一堆 SDK 而变慢。
+首次 `get_transport("anthropic_messages")` 调用时才 import `transports/anthropic.py`——**延迟到实际使用**，启动不会因为 import 一堆 SDK 而变慢。`get_transport()` 在 miss 时会再跑一次 `_discover_transports()`，避免测试或乱序 import 导致 registry 只被部分填充。`_discover_transports()` 对每个 transport 模块的 import 用 `try/except ImportError` 包裹——某个 provider SDK 没装时不影响其他 transport。
+
+## ProviderProfile — 第二层抽象（可插拔 provider）
+
+Transport 按 `api_mode` 分四类，但同一个 `api_mode` 下不同 provider 仍有大量差异（max_tokens 默认值、reasoning 配置位置、temperature 处理、extra_body 字段、模型目录端点……）。v0.14.0 把这些差异收敛到 **`ProviderProfile`** 数据类，并把 ~33 个 provider 全部下沉为插件。
+
+### ProviderProfile ABC
+
+```python
+# providers/base.py
+@dataclass
+class ProviderProfile:
+    # 身份
+    name: str
+    api_mode: str = "chat_completions"
+    aliases: tuple = ()
+    # 人类可读元数据
+    display_name: str = ""
+    description: str = ""
+    signup_url: str = ""
+    # auth 与端点
+    env_vars: tuple = ()
+    base_url: str = ""
+    models_url: str = ""        # 显式 models 端点，缺省回退 {base_url}/models
+    auth_type: str = "api_key"  # api_key|oauth_device_code|oauth_external|copilot|aws_sdk
+    supports_health_check: bool = True
+    # 模型目录
+    fallback_models: tuple = ()
+    hostname: str = ""
+    # 客户端 / 请求 quirk
+    default_headers: dict = field(default_factory=dict)
+    fixed_temperature: Any = None        # OMIT_TEMPERATURE 哨兵 = 不发送
+    default_max_tokens: int | None = None
+    default_aux_model: str = ""          # 辅助任务用的廉价模型
+
+    # ── 可覆盖钩子（复杂 provider 在子类里 override）──
+    def get_hostname(self) -> str: ...
+    def prepare_messages(self, messages) -> list: ...
+    def build_extra_body(self, *, session_id=None, **ctx) -> dict: ...
+    def build_api_kwargs_extras(self, *, reasoning_config=None, **ctx) -> tuple[dict, dict]: ...
+    def fetch_models(self, *, api_key=None, timeout=8.0) -> list[str] | None: ...
+```
+
+`ProviderProfile` 是**声明式**的——它描述 provider 行为，不拥有 client 构建、credential rotation、streaming（这些仍在 `AIAgent`）。`fetch_models` 默认实现走 `{models_url or base_url}/models` 加 Bearer auth，并带 `hermes-cli/<ver>` UA（绕过某些 provider 的 WAF）；复杂 provider 在子类里 override：
+
+- **`AnthropicProfile`** — 用 `x-api-key` + `anthropic-version` 头，而非 Bearer
+- **`OpenRouterProfile`** — 公共目录（无需 auth）+ `_CACHE`；`build_extra_body` 注入 provider preferences 与 Pareto Code router；`build_api_kwargs_extras` 把 `reasoning_config` 整包塞进 `extra_body.reasoning`，并为经 OpenRouter 路由的 Grok 模型附 `x-grok-conv-id` 头
+- **Gemini** — `thinking_config` 翻译
+
+### 插件布局与注册表
+
+```
+plugins/model-providers/
+├── README.md
+├── openrouter/
+│   ├── __init__.py      # import 时调用 register_provider(profile)
+│   └── plugin.yaml      # 清单: name, kind: model-provider, version, description
+├── anthropic/ ...
+└── ...                  # 共 29 个 bundled 插件目录
+```
+
+`providers/__init__.py` 是注册表，提供 `register_provider()`、`get_provider_profile()`、`list_providers()`。发现是**惰性**的——首次调用 `get_provider_profile()` / `list_providers()` 时执行 `_discover_providers()`，按三步顺序：
+
+1. **Bundled 插件** — `<repo>/plugins/model-providers/<name>/`（仓库自带，29 个目录）
+2. **用户插件** — `$HERMES_HOME/plugins/model-providers/<name>/`（按 `register_provider()` 的 last-writer-wins，可覆盖任意 bundled profile）
+3. **Legacy 单文件** — `providers/<name>.py`（向后兼容，via `pkgutil.iter_modules`）
+
+每个插件目录的 `__init__.py` 在 import 时调用 `register_provider(profile)` 自注册。每个 `_import_plugin_dir()` 用 `try/except` 包裹——单个插件加载失败只 warn，不影响其他。
+
+### 各层从 registry 自动接线
+
+加新 provider 只需在 `plugins/model-providers/` 下放一个目录，无需改其他代码——以下各层都从 registry 读取：
+
+| 层 | 用途 |
+|----|------|
+| `hermes_cli/auth.py` | 用每个 api-key profile 扩展 `PROVIDER_REGISTRY` |
+| `hermes_cli/models.py` | 扩展 `CANONICAL_PROVIDERS`，在 `provider_model_ids()` 里调 `profile.fetch_models()` |
+| `hermes_cli/doctor.py` | 为每个 `auth_type="api_key"` profile 加 `/models` 健康检查 |
+| `hermes_cli/config.py` | 把每个 `env_var` 注入 `OPTIONAL_ENV_VARS` |
+| `hermes_cli/runtime_provider.py` | URL 检测失败时回退读 `profile.api_mode` |
+| `agent/model_metadata.py` | `profile.get_hostname()` 做 hostname→provider 反查 |
+| `agent/auxiliary_client.py` | 优先读 `profile.default_aux_model` |
+| `transports/chat_completions.py::_build_kwargs_from_profile()` | 每次调用都跑 `prepare_messages` / `build_extra_body` / `build_api_kwargs_extras` |
+| `run_agent.py` | 传 `provider_profile=<ProviderProfile>`，transport 走 profile 路径而非 legacy flag 路径 |
+
+### 2026-04-29 后新增的 provider
+
+| Provider | 插件目录 | 要点 |
+|----------|---------|------|
+| xAI Grok | `xai/`（`api_mode=codex_responses`） | Grok 经 xAI Responses API；SuperGrok 订阅的 OAuth 在 credential 层处理（`auth.json` 的 `providers.xai-oauth`、`agent/credential_sources.py` 的 loopback PKCE），不是 profile |
+| NovitaAI | `novita/` | OpenAI 兼容，`base_url=https://api.novita.ai/openai/v1` |
+| Azure Foundry | `azure-foundry/` | OpenAI 兼容端点（每资源 base_url 由用户提供）；可选 Microsoft Entra ID 无密钥认证——见 `agent/azure_identity_adapter.py`，`auth_mode=entra_id` 时用 `azure-identity` 的 `DefaultAzureCredential` 链，惰性 import |
+| NVIDIA NIM | `nvidia/` | `base_url=https://integrate.api.nvidia.com/v1`，`default_max_tokens=16384`；命中 NVIDIA Cloud base_url 时 `_apply_client_headers_for_base_url()` 附加 billing origin 头 |
+
+此外，`hermes_cli/proxy/`（`__init__.py` / `cli.py` / `server.py` / `adapters/`）是一个**本地 OpenAI 兼容代理**：监听 `127.0.0.1:<port>`，丢弃客户端的 `Authorization` 头，把用户已登录的 OAuth provider 凭证附到转发请求上（凭证临近过期时自动刷新），让外部 app 借用用户的订阅。首个 first-class adapter 是 `nous`（Nous Portal）。
 
 ## Codex App-Server 运行时（可选 opt-in，#24182）
 
@@ -154,13 +258,14 @@ def register_transport(api_mode: str, transport_cls: type) -> None:
 
 ### 迁移状态
 
-| Provider | Transport 覆盖 | 状态 |
-|----------|---------------|------|
-| Anthropic | AnthropicTransport（委托 `anthropic_adapter.py`） | 全路径完成 |
-| Chat Completions（OpenAI 兼容） | ChatCompletionsTransport | 全路径完成 |
-| OpenAI Responses API（Codex、xAI Grok OAuth） | ResponsesApiTransport（`codex_responses`） | 全路径完成 |
-| AWS Bedrock | BedrockTransport | 全路径完成 |
-| Codex App-Server 运行时 | `CodexAppServerSession`（独立路径，opt-in） | 子进程运行时，默认关闭 |
+| api_mode | Transport / Runtime | 状态 |
+|----------|---------------------|------|
+| `anthropic_messages` | AnthropicTransport（委托 `anthropic_adapter.py`） | 全路径完成 |
+| `chat_completions` | ChatCompletionsTransport（profile 路径 + legacy flag 路径） | 全路径完成 |
+| `codex_responses` | ResponsesApiTransport（委托 `codex_responses_adapter.py`） | 全路径完成 |
+| `bedrock_converse` | BedrockTransport | 全路径完成 |
+| `codex_app_server` | `codex_runtime.py` + `CodexAppServerSession`（可选子进程运行时） | 完成 |
+| Provider 声明 | `ProviderProfile` 插件（29 个 bundled，~33 个 provider） | 完成 |
 | Auxiliary Client（压缩/记忆） | 已迁移到 Transport | 完成 |
 
 ## 与 ProviderProfile 协作（v0.13.0+）
@@ -181,74 +286,25 @@ ProviderProfile.build_api_kwargs_extras()  →  Transport.build_kwargs 合并到
 
 ## 与其他系统的关系
 
-- [[auxiliary-client-architecture]] — auxiliary_client 已迁移到 Transport
-- [[smart-model-routing]] — transport 基于 api_mode 派发，与 ProviderProfile 协作
+- [[auxiliary-client-architecture]] — auxiliary_client 已迁移到 Transport，并读 `profile.default_aux_model`
+- [[smart-model-routing]] — transport 基于 api_mode 派发，与模型路由配合
 - [[interrupt-and-fault-tolerance]] — 中断、retry 仍在 AIAgent 层，不属于 transport 职责
 - [[prompt-caching-optimization]] — cache 统计通过 `extract_cache_stats` 钩子暴露
 
 ## 相关文件
 
+- `providers/base.py`（184 行） — `ProviderProfile` 数据类 + `OMIT_TEMPERATURE` 哨兵
+- `providers/__init__.py`（191 行） — provider 注册表 + 惰性插件发现
+- `plugins/model-providers/<name>/` — 29 个 bundled provider 插件（`__init__.py` + `plugin.yaml`）
 - `agent/transports/base.py`（89 行） — `ProviderTransport` ABC
 - `agent/transports/types.py`（162 行） — `NormalizedResponse` 共享类型
-- `agent/transports/__init__.py`（68 行） — 注册表 + 惰性发现
+- `agent/transports/__init__.py`（68 行） — transport 注册表 + 惰性发现
 - `agent/transports/anthropic.py`（179 行） — Anthropic Messages
 - `agent/transports/chat_completions.py`（614 行） — Chat Completions
-- `agent/transports/codex.py`（283 行） — OpenAI Responses API（`codex_responses`）
+- `agent/transports/codex.py`（283 行） — OpenAI Responses API
 - `agent/transports/bedrock.py`（154 行） — AWS Bedrock Converse
-- `agent/transports/codex_app_server.py`（399 行） — codex app-server 子进程客户端
-- `agent/transports/codex_app_server_session.py`（810 行） — codex app-server 单轮会话
-- `agent/transports/codex_event_projector.py`（312 行） — app-server 事件投影
-- `agent/transports/hermes_tools_mcp_server.py`（233 行） — Hermes 工具 MCP server
-- `agent/codex_runtime.py` — `run_codex_app_server_turn()` 运行时入口
+- `agent/transports/codex_app_server*.py` — Codex App Server 子进程运行时
+- `agent/codex_runtime.py`（448 行） — Codex 运行时函数（app-server / Responses 流式）
+- `agent/azure_identity_adapter.py` — Azure Foundry 的 Microsoft Entra ID 适配器
+- `hermes_cli/proxy/` — 本地 OpenAI 兼容代理（OAuth provider）
 - `run_agent.py` — 10+ 接入点
-- `agent/auxiliary_client.py` — 辅助路径已迁移
-
-## v0.13.0：Provider Profile 全面插件化
-
-Transport ABC 抽象了"消息/工具格式 + 调用形状"，**ProviderProfile**（`providers/base.py:25`）抽象了"provider 的元数据 + 行为开关"：
-
-```python
-@dataclass
-class ProviderProfile:
-    # Identity
-    name: str
-    api_mode: str = "chat_completions"
-    aliases: tuple = ()
-
-    # Human-readable metadata
-    display_name: str = ""
-    description: str = ""
-    signup_url: str = ""
-
-    # Auth & endpoints
-    env_vars: tuple = ()
-    base_url: str = ""
-    models_url: str = ""
-    auth_type: str = "api_key"  # api_key | oauth_device_code | oauth_external | copilot | aws_sdk
-
-    # Model catalog
-    fallback_models: tuple = ()
-    # ...
-```
-
-`providers/__init__.py` 头部注释明确：
-
-> Provider profiles can live in two places:
->   1. Bundled plugins: `plugins/model-providers/<name>/`
->   2. User plugins: `$HERMES_HOME/plugins/model-providers/<name>/`
-
-每个 plugin dir 含：
-- `__init__.py` — 在 import 时调用 `register_provider(profile)`
-- `plugin.yaml` — manifest（`kind: model-provider`）
-
-**惰性发现**：第一次 `get_provider_profile()` / `list_providers()` 调用时扫描两边，导入每个 plugin。**用户插件覆盖 bundled**（last-writer-wins），第三方可以 monkey-patch / 替换任意内置 profile。
-
-**向后兼容**：`providers/*.py` 的单文件 profile 仍走 `pkgutil.iter_modules` 发现（不强制 plugin dir 结构）；新 profile 推荐 plugin layout。
-
-### 当前 bundled 29 个
-
-ai-gateway, alibaba, alibaba-coding-plan, anthropic, arcee, azure-foundry, bedrock, copilot, copilot-acp, custom, deepseek, gemini, gmi, huggingface, kilocode, kimi-coding, minimax, nous, nvidia, ollama-cloud, openai-codex, opencode-zen, openrouter, qwen-oauth, stepfun, xai, xiaomi, zai
-
-### 与 Transport 的协作
-
-ProviderProfile 描述**这个 provider 怎么登/在哪/默认行什么模型**，Transport 描述**怎么编消息/工具/响应**——profile.`api_mode` 字段决定走哪个 transport，profile 的其它字段塞 transport 的 `build_kwargs(provider_quirks=...)` 形参。从此 transport 不再写满布尔开关，profile 不碰 client 构造/凭证轮转/streaming（这些留在 AIAgent）。

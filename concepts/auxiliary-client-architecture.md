@@ -1,17 +1,17 @@
 ---
 title: Auxiliary Client 辅助客户端架构
 created: 2026-04-08
-updated: 2026-05-18
+updated: 2026-05-19
 type: concept
 tags: [architecture, module, component, agent, tool]
-sources: [agent/auxiliary_client.py, providers/__init__.py, providers/base.py]
+sources: [agent/auxiliary_client.py, providers/base.py]
 ---
 
 # Auxiliary Client — 辅助客户端架构
 
 ## 概述
 
-Auxiliary Client 位于 `agent/auxiliary_client.py`（5286 行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
+Auxiliary Client 位于 `agent/auxiliary_client.py`（约 225KB / 5286 行），是 Hermes Agent 的**辅助 LLM 客户端路由器**。它为所有非主对话的 LLM 任务（上下文压缩、会话搜索摘要、视觉分析、Web 提取、技能快照生成等）提供统一的提供商解析和调用接口。
 
 核心理念：**所有辅助任务共享同一个提供商解析链，避免每个消费者重复实现 fallback 逻辑。**
 
@@ -29,33 +29,30 @@ Auxiliary Client 位于 `agent/auxiliary_client.py`（5286 行），是 Hermes A
 
 Auxiliary Client 通过**多层 provider 解析 + 自动降级 + 客户端缓存**解决这些问题。
 
-### 提供商解析链（Text 任务）
+### 提供商解析链（auto 模式）
+
+`_resolve_auto()` 分两步：
 
 ```
-优先级（auto 模式）:
-  1. 主提供商（如果不是聚合器）→ 直接用主模型凭证
-  2. OpenRouter (OPENROUTER_API_KEY)
-  3. Nous Portal (~/.hermes/auth.json 中的活跃提供商)
-  4. 自定义端点 (config.yaml model.base_url + OPENAI_API_KEY)
-  5. Codex OAuth (Responses API, gpt-5.2-codex)
-  6. 原生 Anthropic
-  7. 直接 API Key 提供商 (z.ai/GLM, Kimi/Moonshot, MiniMax 等)
-  8. None → 功能不可用
+Step 1: 非聚合器主提供商 → 直接用主模型凭证
+        （main_provider 不在 {"openrouter", "nous"} 时）
+
+Step 2: 走 _get_provider_chain() 降级链（按序）:
+  1. ("openrouter",   _try_openrouter)        OPENROUTER_API_KEY
+  2. ("nous",         _try_nous)              ~/.hermes/auth.json 活跃 provider
+  3. ("local/custom", _try_custom_endpoint)   config.yaml model.base_url + key
+  4. ("api-key",      _resolve_api_key_provider)  直接 API Key provider
+                                              (DeepSeek/Alibaba/ZAI/Kimi/MiniMax 等)
+  → 全部失败 → None（功能不可用）
 ```
 
-**关键设计**：如果用户的主提供商是 Alibaba、DeepSeek、ZAI 等非聚合器，Auxiliary Client 会**直接使用主提供商的凭证**，无需额外配置 OpenRouter key。这大幅降低了使用门槛。
+**关键设计**：如果用户的主提供商是 Alibaba、DeepSeek、ZAI 等非聚合器，Step 1 会**直接使用主提供商的凭证**，无需额外配置 OpenRouter key。这大幅降低了使用门槛。
 
-### 提供商解析链（Vision 任务）
+**`openai-codex` 故意不在 `_get_provider_chain()` 里**：ChatGPT-账户 Codex 端点只接受一个不断变化、未公开的模型 allow-list，用猜测的模型 ID 回退到它失败率很高。Codex 仅在用户主 provider *本身就是* `openai-codex` 时（Step 1），或调用方显式带 model 请求它时使用。
 
-```
-  1. 主提供商（如果是支持的视觉后端）
-  2. OpenRouter
-  3. Nous Portal
-  4. Codex OAuth (gpt-5.2-codex 支持 vision)
-  5. 原生 Anthropic
-  6. 自定义端点 (本地视觉模型: Qwen-VL, LLaVA, Pixtral)
-  7. None
-```
+### 不健康 provider 缓存
+
+当某辅助 provider 返回 HTTP 402（额度耗尽），`_mark_provider_unhealthy()` 把它标记为不健康 `_AUX_UNHEALTHY_TTL_SECONDS`（600 秒）。`_resolve_auto()` 的 Step 2 与 `_try_payment_fallback()` 都会查 `_is_provider_unhealthy()` 并跳过，避免每次 aux 调用都对一个已耗尽的 provider 浪费一个 RTT。缓存仅进程内、条目自动过期（充值后无需手动恢复）。
 
 ## 核心组件
 
@@ -181,58 +178,67 @@ def shutdown_cached_clients():
 
 这是 Hermes Agent 解决 **prompt_toolkit + async OpenAI SDK** 兼容性问题的关键代码。
 
-### 6. 支付/配额耗尽自动降级
+### 6. 分层 fallback：配置链 + 主 Agent 安全网 + 支付/限流/连接降级
 
-```python
-def _is_payment_error(exc: Exception) -> bool:
-    """检测 HTTP 402、余额不足以及每日配额耗尽错误"""
-    if status_code == 402: return True
-    if "credits" in err or "insufficient funds" in err: return True
-    if "can only afford" in err or "billing" in err: return True
-    # 每日配额耗尽 — 与余额耗尽语义等价（status 402/429/None）
-    if "quota exceeded" in err or "tokens per day" in err: return True
-    if "resource exhausted" in err: return True  # Vertex AI / gRPC 配额
+辅助调用的失败恢复分三类失败信号 × 两条 fallback 路径：
 
-def _try_payment_fallback(failed_provider, task):
-    """跳过失败的提供商，尝试链中下一个可用提供商"""
-```
+**失败信号**：
+- `_is_payment_error(exc)` — HTTP 402、429 / 无状态码但带 `credits`、`insufficient funds`、`can only afford`、`billing`、`payment required`，以及 Bedrock / Vertex AI 的 daily quota 关键字（`quota exceeded`、`too many tokens per day`、`resource exhausted` 等——日 token 配额耗尽语义等同于 credit 耗尽）
+- `_is_rate_limit_error(exc)` — 限流（429）
+- `_is_connection_error(exc)` — 连接/超时（之后还会 `_evict_cached_client_instance(client)` 丢掉脏 client）
 
-`_is_payment_error`（`agent/auxiliary_client.py:2235-2264`）除了 HTTP 402 / "insufficient funds" 之外，现在也把**每日 token 配额耗尽**视为支付错误——匹配 "quota exceeded"、"tokens per day"（Bedrock "Too many tokens per day"）、"resource exhausted"（Vertex AI / gRPC）等模式。这类错误在配额重置前无法服务请求，与余额耗尽功能等价，因此触发同样的 provider fallback 逻辑。
-
-**工作流程**：
-1. 调用 LLM API
-2. 如果遇到 max_tokens 参数错误 → 重试用 max_completion_tokens
-3. 如果遇到支付错误（402/余额不足/每日配额耗尽） → 自动切换到下一个可用 provider
-4. 记录日志通知用户降级
-
-### 6.1 分层辅助 fallback 阶梯（commit a574246）
-
-对于**显式指定**辅助 provider 的任务（非 `auto` 模式），当主辅助 provider 调用失败时，按以下阶梯逐级降级：
+**fallback 路径**（`call_llm` / `acall_llm` 内）：
 
 ```
-1. 主辅助 provider                              ← 任务配置的 provider
-2. auxiliary.<task>.fallback_chain（来自 config）  ← _try_configured_fallback_chain()
-3. 主 agent 的 provider + model 安全网            ← _try_main_agent_model_fallback()
-4. 警告并重新抛出原始错误
+should_fallback 触发条件:
+    resolved_provider == "auto"
+    OR _is_payment_error(first_err)       # capacity error 绕过 explicit-provider gate
+    OR _is_connection_error(first_err)
+
+is_auto:                                  # auto 用户
+    → _try_payment_fallback(resolved_provider, task, reason)
+      （沿 _get_provider_chain() 找下一个健康 provider）
+
+explicit-provider:                        # 用户配置了具体 aux provider
+    → 1. _try_configured_fallback_chain(task, ..., reason)
+         读 auxiliary.<task>.fallback_chain 列表，按序尝试
+         （每个 entry: {provider, model?, base_url?, api_key?}）
+    → 2. _try_main_agent_model_fallback(failed_provider, task, reason)
+         最后一道安全网——用主 agent 的 provider + model
+         （跳过 main_provider == failed_provider 与不健康 provider）
+
+全部耗尽 → 一次 user-visible warning + 抛出原始错误
 ```
 
-`agent/auxiliary_client.py` 新增两个函数：
+`_try_main_agent_model_fallback` 的标签为 `main-agent(<provider>)`；只在显式 aux provider 模式下作为兜底（auto 模式不需要——它的 Step 1 就是主 agent 模型）。命中 payment error 还会把那个 provider 用 `_mark_provider_unhealthy()` 标 600 秒不健康，后续 aux 调用绕过它。
 
-- `_try_configured_fallback_chain()` — 读取 `config.yaml` 的 `auxiliary.<task>.fallback_chain`，逐个尝试条目，解析为 OpenAI 客户端。
-- `_try_main_agent_model_fallback()` — 用主 agent 的 provider+model 作为最后兜底。**跳过条件**：失败的 provider 本身就是主 provider；或主 provider 当前不健康。
+**`config.yaml` 中的配置链示例**：
 
-`auto` 模式用户不走此阶梯，仍沿用原有的支付降级链（第 6 节）。
+```yaml
+auxiliary:
+  compression:
+    provider: anthropic
+    model: claude-haiku-4-5
+    fallback_chain:
+      - { provider: openrouter, model: google/gemini-3-flash-preview }
+      - { provider: nous }
+      - { provider: deepseek, model: deepseek-chat }
+```
 
-### 7. 公开 API
+此外还有一条参数级 fallback：`max_tokens` 参数被 reasoning 模型拒绝时自动改用 `max_completion_tokens` 重试。
+
+### 7. 与 ProviderProfile 的集成
+
+Aux 默认模型解析优先读 `ProviderProfile.default_aux_model`，找不到时才回退到 `_API_KEY_PROVIDER_AUX_MODELS_FALLBACK` 字典（保留兼容尚未迁移到 profile 的 provider）。新 provider 应直接在它的 `ProviderProfile` 上设置 `default_aux_model`——不必再改 auxiliary_client。Transport 选择路径也复用主 agent 的 `get_transport()`（`agent/transports/__init__.py`），见调用点 `auxiliary_client.py:975 / 1019`，避免协议适配代码漂移。
+
+### 8. 公开 API
 
 | 函数 | 用途 |
 |---|---|
 | `get_text_auxiliary_client(task)` | 获取文本任务的同步客户端 |
 | `get_async_text_auxiliary_client(task)` | 获取文本任务的异步客户端 |
-| `get_vision_auxiliary_client()` | 获取视觉任务的同步客户端 |
-| `get_async_vision_auxiliary_client()` | 获取视觉任务的异步客户端 |
-| `call_llm(task, messages, ...)` | 中央同步 LLM 调用入口 |
-| `async_call_llm(task, messages, ...)` | 中央异步 LLM 调用入口 |
+| `call_llm(task, messages, ...)` | 中央同步 LLM 调用入口（含分层 fallback） |
+| `async_call_llm(task, messages, ...)` | 中央异步 LLM 调用入口（含分层 fallback） |
 | `extract_content_or_reasoning(response)` | 提取响应内容，支持 reasoning 模型 |
 | `get_available_vision_backends()` | 获取当前可用的视觉后端列表 |
 | `get_auxiliary_extra_body()` | 获取 provider 特定的 extra_body |
@@ -264,12 +270,16 @@ def _try_payment_fallback(failed_provider, task):
 ```yaml
 auxiliary:
   compression:
-    provider: auto        # 或 openrouter, nous, custom
+    provider: auto        # 或 openrouter, nous, custom, anthropic, deepseek, ...
     model: gemini-3-flash
     timeout: 30
+    # 可选：失败时的有序 fallback 链（仅在 provider != "auto" 时生效）
+    fallback_chain:
+      - { provider: openrouter, model: google/gemini-3-flash-preview }
+      - { provider: nous }
   vision:
     provider: auto
-    model: claude-sonnet-4-5-20250514
+    model: claude-haiku-4-5
   web_extract:
     provider: openrouter
     model: google/gemini-3-flash-preview
@@ -297,8 +307,9 @@ print(get_available_vision_backends())
 
 ## 与其他系统的关系
 
-- [[context-compressor-architecture]] — 使用 get_text_auxiliary_client("compression")
+- [[provider-transport-architecture]] — auxiliary_client 复用 `get_transport()` 与 `ProviderProfile`（`default_aux_model`）
+- [[context-compressor-architecture]] — 使用 `get_text_auxiliary_client("compression")`
 - [[tool-registry-architecture]] — web_tools 和 browser_tool 通过 registry 注册
-- [[credential-pool-and-isolation]] — 使用 load_pool() 获取凭证
+- [[credential-pool-and-isolation]] — 使用 `load_pool()` 获取凭证
 - [[prompt-builder-architecture]] — 辅助客户端不参与主对话提示构建
 - [[model-tools-dispatch]] — model_tools.py 通过 auxiliary_client 处理侧边任务

@@ -1,17 +1,17 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-05-18
+updated: 2026-05-19
 type: concept
-tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy, i18n]
-sources: [gateway/run.py, gateway/platforms/, plugins/platforms/, gateway/slash_access.py, hermes_cli/config.py]
+tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy]
+sources: [gateway/run.py, gateway/platforms/, plugins/platforms/, hermes_cli/config.py]
 ---
 
 # 消息网关架构
 
 ## 概述
 
-Gateway 是 Hermes Agent 的**统一消息网关**，支持 23+ 平台（18 个内置适配器 + 5 个插件平台），从单一进程管理所有平台的连接和消息分发。
+Gateway 是 Hermes Agent 的**统一消息网关**，支持 19 个内置平台 + 5 个插件平台（共 24 个），从单一进程管理所有平台的连接和消息分发。插件平台通过 `PlatformRegistry` 注入，无需改 gateway 核心代码。
 
 ## 架构
 
@@ -51,7 +51,16 @@ gateway/
     ├── webhook.py
     ├── msgraph_webhook.py
     ├── api_server.py
+    ├── msgraph_webhook.py   # MS Graph webhook（v0.13.x+）
+    ├── yuanbao.py / _media / _proto / _sticker
     └── base.py
+
+plugins/platforms/         # 插件化平台（v0.13.x+）
+├── irc/                   # IRC（参考实现）
+├── line/                  # LINE Messaging API
+├── google_chat/           # Google Chat
+├── teams/                 # Microsoft Teams
+└── simplex/               # SimpleX Chat
 ```
 
 ## 平台支持
@@ -81,12 +90,12 @@ gateway/
 | Webhook | HTTP | 外部事件接收 |
 | MSGraph Webhook | Microsoft Graph | 内置适配器，通过 Graph 订阅接收事件（`gateway/platforms/msgraph_webhook.py`） |
 | **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+） |
-| **Microsoft Graph webhook**（核心） | HTTP webhook | `gateway/platforms/msgraph_webhook.py`，Graph change-notification 入站，订阅验证握手，`allowed_source_cidrs`（v2026.5.x+） |
+| **MS Graph Webhook** | Webhook | Microsoft Graph 订阅式消息（gateway/platforms/msgraph_webhook.py） |
 | **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，参考实现） |
-| **LINE**（插件） | Messaging API | 插件平台（`plugins/platforms/line/`） |
-| **SimpleX Chat**（插件） | SimpleX | 去中心化加密消息（`plugins/platforms/simplex/`） |
-| **Google Chat**（插件） | Chat API | 企业消息（`plugins/platforms/google_chat/`） |
-| **Microsoft Teams**（插件） | Teams Apps SDK | aiohttp webhook 接收，线程回复通过 `app.reply()`（`plugins/platforms/teams/`） |
+| **LINE**（插件） | LINE Messaging API | 个人/群组消息（plugins/platforms/line/） |
+| **Google Chat**（插件） | Chat API | bundled plugin（plugins/platforms/google_chat/） |
+| **Microsoft Teams**（插件） | Bot Framework | 卡片审批 UX、保持卡片可见性、`hermes` UA、teams_pipeline 出站投递（plugins/platforms/teams/） |
+| **SimpleX Chat**（插件） | Bridge | 隐私优先即时通讯（plugins/platforms/simplex/） |
 
 ### Bundled 平台插件（plugins/platforms/）
 
