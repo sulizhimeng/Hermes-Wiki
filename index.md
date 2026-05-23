@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-05-20 | Total pages: 43
+> Last updated: 2026-05-22 | Total pages: 40 | Tracking: v0.14.0
 
 ## Entities
 
@@ -36,29 +36,26 @@
 - [[security-defense-system]] — 5 层防御体系，20 个 P0 闭合（v0.13.0+v0.14.0），100+ 威胁模式
 - [[interrupt-and-fault-tolerance]] — 中断传播、凭证池轮换、Fallback 模型链
 - [[credential-pool-and-isolation]] — 多密钥自动轮换、Profile 隔离
-- [[lsp-integration]] — LSP 语义诊断、git-workspace 门控、delta only（v0.14.0）
 
 ### 多 Agent
-- [[multi-agent-architecture]] — 5 种机制概览（含 Kanban + goal loop）
-- [[multi-agent-kanban]] — SQLite 板 + 心跳 + 死锁回收 + 自动分解 + Swarm + 诊断（v0.13.0）
-- [[goal-loop-and-steering]] — `/goal` Ralph + `/steer` + `/queue` + `/handoff` 四种 session 级控制原语
+- [[multi-agent-architecture]] — 5 种 Agent 协作机制（delegate/MoA/Background Review/send_message/**Kanban**）
+- [[kanban-multi-agent-board]] — 可持久化任务板，SQLite + 心跳 + 熔断 + 幻觉拦截（v0.13+）
+- [[goal-and-ralph-loop]] — `/goal` + `/subgoal` 持续推进系统（v0.13/v0.14）
 
 ### 平台与扩展
 - [[cli-architecture]] — 经典 CLI + Ink TUI 双前端、斜杠命令补全、Skin 引擎
 - [[configuration-and-profiles]] — 分层配置、Profile 隔离、自动迁移
-- [[hook-system-architecture]] — Hook 系统（Gateway Hooks + Plugin System + Shell Hooks），事件驱动+工具注册+上下文注入
-- [[mcp-and-plugins]] — MCP 集成（SSE + OAuth forwarding）、插件钩子系统
-- [[provider-plugin-system]] — ProviderProfile ABC + 29 内置 provider 插件（v0.13.0）
-- [[hermes-proxy]] — OAuth → OpenAI 兼容本地代理（v0.14.0）
-- [[i18n-and-locales]] — 16 个语言区域 + 7 个生产语言（v0.13.0）
-- [[terminal-backends]] — 7 种终端后端（含 Vercel Sandbox）、环境抽象
-- [[cron-scheduling]] — 内置调度器、no_agent 模式、webhook 直送
+- [[hook-system-architecture]] — Hook 系统（Gateway Hooks + Plugin System），事件驱动+工具注册+上下文注入
+- [[mcp-and-plugins]] — MCP 集成、插件钩子系统、OAuth 支持
+- [[terminal-backends]] — 7 种终端后端（含 Vercel Sandbox）、环境抽象、持久化 Shell
+- [[cron-scheduling]] — 内置调度器、自然语言调度、多平台投递、no_agent watchdog
 - [[trajectory-and-data-generation]] — 轨迹保存、批量运行器、RL 训练环境
 - [[prompt-builder-architecture]] — 系统提示模块化组装，注入防护+技能缓存+模型特定指导
 - [[context-compressor-architecture]] — 自动上下文压缩，结构化摘要+迭代更新+工具对完整性保障
 - [[model-tools-dispatch]] — 工具编排与调度，异步桥接+动态 schema 调整+参数类型强制
-- [[gateway-session-management]] — 网关会话管理，state.db 唯一权威+自动续约+X-Hermes-Session-Key
-- [[messaging-gateway-architecture]] — 22 平台消息网关（17 内置 + 5 插件），PlatformRegistry
+- [[gateway-session-management]] — 网关会话管理，多平台会话隔离+PII 脱敏+重置策略
+- [[messaging-gateway-architecture]] — 22 平台统一网关（含 Teams/LINE/SimpleX/Google Chat 插件平台）
+- [[hermes-proxy]] — OAuth 订阅 → OpenAI 兼容本地代理（v0.14）
 
 ### 更新日志
 - [[2026-04-09-update]] — 59 commits

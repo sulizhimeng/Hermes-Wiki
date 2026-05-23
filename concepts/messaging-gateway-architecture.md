@@ -1,17 +1,17 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-05-21
+updated: 2026-05-22
 type: concept
-tags: [gateway, architecture, module, telegram, discord, messaging, qq, proxy, teams, line, simplex]
-sources: [gateway/run.py, gateway/platforms/, gateway/platform_registry.py, plugins/platforms/, hermes_cli/config.py]
+tags: [gateway, architecture, module, telegram, discord, messaging, qq, teams, line, simplex, proxy]
+sources: [gateway/run.py, gateway/platforms/, plugins/platforms/, hermes_cli/config.py]
 ---
 
 # 消息网关架构
 
 ## 概述
 
-Gateway 是 Hermes Agent 的**统一消息网关**，截至 v2026.5.16 共支持 **22 个消息平台**，从单一进程管理所有平台的连接和消息分发。其中 5 个由 `plugins/platforms/` 以**插件形式**接入（IRC、Teams、Google Chat、LINE、SimpleX），其余 17 个仍在 `gateway/platforms/` 内置。
+Gateway 是 Hermes Agent 的**统一消息网关**，截至 v0.14 (2026-05-16) 支持 **22 个消息平台**（含 5 个插件平台：IRC / Teams / Google Chat / LINE / SimpleX Chat），从单一进程管理所有平台的连接和消息分发。
 
 ## 架构
 
@@ -90,10 +90,35 @@ plugins/platforms/         # 插件化平台（v0.13.x+）
 | Webhook | HTTP | 外部事件接收 |
 | **腾讯元宝 Yuanbao** | API | 原生文本+媒体投递，sticker 支持（v2026.4.23+） |
 | **IRC**（插件） | TLS asyncio | 零外部依赖，TLS、PING/PONG、nick collision、NickServ、频道寻址（v2026.4.23+，参考实现） |
-| **Microsoft Teams**（插件） | MS Graph + Webhook | Microsoft Graph auth/client + webhook listener + pipeline plugin runtime + outbound delivery；`plugins/platforms/teams/` + `plugins/teams_pipeline/`（v2026.5.16） |
-| **Google Chat**（插件） | API | 第 20 个平台，`plugins/platforms/google_chat/`（v2026.5.7） |
-| **LINE**（插件） | LINE Messaging API | 日韩台主流，`plugins/platforms/line/`（v2026.5.16） |
-| **SimpleX Chat**（插件） | E2E P2P | 去中心化、无 user ID，`plugins/platforms/simplex/`（v2026.5.16） |
+| **Microsoft Teams**（插件） | Graph + Webhook | v0.12 落地插件 → v0.14 端到端：auth + webhook listener + pipeline + 投递（`plugins/teams_pipeline/`） |
+| **Google Chat**（插件） | API | 第 20 平台（v0.13，`plugins/platforms/google_chat/`） |
+| **LINE**（插件） | Messaging API | 日韩台主流通讯（v0.14，`plugins/platforms/line/`） |
+| **SimpleX Chat**（插件） | 去中心化无 ID | privacy-focused（v0.14，`plugins/platforms/simplex/`） |
+| **Google Meet**（plugin） | OpenAI Realtime + Node bot | 会议接入：转录 + 跟进（v0.12，`plugins/google_meet/`） |
+
+> 还原成插件后，gateway 核心从 21 个 if/elif 收敛到 1 个 registry 查询；新平台 0 代码改 core。
+
+## v0.13+ 增强汇总
+
+| 增强 | 说明 |
+|------|------|
+| **Session auto-resume** | 网关重启后自动恢复未完成会话（`#21192`） |
+| **统一 allowlist** | Slack/Telegram/Mattermost/Matrix/DingTalk 全部支持 `allowed_channels`/`allowed_chats`/`allowed_rooms`（`#21251`） |
+| **WhatsApp 默认拒生人** | 默认 reject strangers（v0.13 安全 wave） |
+| **Discord 历史回填** | 首次进频道/线程读消息历史（`#25984`） |
+| **Discord role-allowlist guild-scoped** | 修 CVSS 8.1 跨 guild DM bypass |
+| **Native multi-image 投递** | Telegram/Discord/Slack/Mattermost/Email/Signal 全平价（`#17909`） |
+| **FLAC 音频路由** | + Telegram 文档 fallback（`#17833`） |
+| **`/handoff` 实时切 model/persona/profile** | 不丢任何 message/tool call（`#23395`） |
+| **`clarify` 原生按钮** | Telegram + Discord 多选用平台按钮（`#24199/#25485`） |
+| **Telegram skip-STT audio path + 2GB cap** | 通过 local Bot API server |
+| **`ignore_root_dm` + lobby** | Telegram 系统命令集中（`c931dad1d`） |
+| **`disable_topic_auto_rename`** | Telegram |
+| **`pin incoming user message`** | Telegram |
+| **`require_mention`** | Signal 群聊只回 @ |
+| **QQBot 原生审批键盘** | 与 Telegram / Discord UX 对齐（`#21342/#21353`） |
+| **Deliverable mode** | 任何 surface 都能 ship 原生 artifact（`#27813`） |
+| **i18n** | 7 个 locale: zh / ja / de / es / fr / uk / tr |
 
 ### Bundled 平台插件（plugins/platforms/）
 
