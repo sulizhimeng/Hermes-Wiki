@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Wiki-Hermes_Agent-blue?style=for-the-badge&logo=markdown" alt="Wiki" height="28">
   <img src="https://img.shields.io/badge/Source-hermes--agent-green?style=for-the-badge&logo=github" alt="Source" height="28">
   <img src="https://img.shields.io/badge/Knowledge_Base-37_pages-orange?style=for-the-badge&logo=obsidian" alt="Knowledge Base" height="28">
-  <img src="https://img.shields.io/badge/Version-v0.12.0_(v2026.4.30)-purple?style=for-the-badge" alt="Version" height="28">
+  <img src="https://img.shields.io/badge/Version-0.12.0-purple?style=for-the-badge" alt="Version" height="28">
   <img src="https://img.shields.io/badge/Verified-Source_Code-brightgreen?style=for-the-badge" alt="Verified" height="28">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="License" height="28">
 </p>
@@ -85,7 +85,7 @@
 - [2026-04-17-update](changelog/2026-04-17-update.md): 641 commits (v0.10.0)，压缩 v3、Bedrock/Gemini/Ollama 新 Provider、Tool Gateway、插件命名空间技能、钉钉 QR 认证、Dashboard 插件
 - [2026-04-18-update](changelog/2026-04-18-update.md): 410 commits post-v0.10.0，Transport ABC 重构、Shell Hooks、Delegate Orchestrator、Step Plan/AI Gateway/xAI STT/KittenTTS、WeCom QR、Subagent 观测性
 - [2026-04-29-update](changelog/2026-04-29-update.md): 182 commits (v2026.4.23)，平台适配器插件化（PlatformRegistry + IRC 参考实现）、Curator 后台技能维护、MiniMax OAuth、Vercel Sandbox、腾讯元宝、`on_session_switch`、`/reload-skills`
-- [2026-05-04-update](changelog/2026-05-04-update.md): **v0.12.0 (v2026.4.30)**，1,096 commits since v0.11.0 + 71 post-release fixes。"The Curator release"——Curator 升级为后台 agent（7 天周期）、19 个消息平台（含 Microsoft Teams 插件）、5 个新 provider（GMI Cloud / Azure AI Foundry / MiniMax OAuth / Tencent Tokenhub / LM Studio 一等公民）、Spotify + Google Meet 内置插件、`video_analyze` 工具、`hermes -z` 一次性模式、Cron `no_agent` 模式、Piper 本地 TTS、Secret redaction 默认 OFF、`/fast` 收紧到 Opus 4.6、Telegram DM 主题模式、TUI 冷启动 -57%
+- [2026-05-05-update](changelog/2026-05-05-update.md): 99 commits (0.12.0)，**Provider Profiles ABC + 33 个插件化 provider**（`plugins/model-providers/`）、Kanban 通用诊断引擎（5 distress kind）+ 幻觉门、i18n 静态消息翻译（zh/ja/de/es）、aux client 429 fallback、TUI `/provider` 别名移除
 
 ---
 
