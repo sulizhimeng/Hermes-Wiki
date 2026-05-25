@@ -2,7 +2,7 @@
 
 > 内容目录。每个 wiki 页面按类型列出，附一行摘要。
 > 查询前先读此文件找到相关页面。
-> Last updated: 2026-05-24 | Total pages: 45 concepts + 2 entities + 28 changelogs | Tracking: v0.14.0 (hermes-agent/master HEAD `186bf25`)
+> Last updated: 2026-05-25 | Total pages: 45 concepts + 2 entities + 29 changelogs | Tracking: v0.14.0 (hermes-agent/master HEAD `b62af47`)
 
 ## Entities
 
@@ -69,6 +69,7 @@
 - [[worktree-isolation]] — Git Worktree 并行隔离模式
 
 ### 更新日志（按时间倒序）
+- [[2026-05-25-update]] — **175 commits 跨日同步**（`186bf25 → b62af47`：Docker `s6-overlay` PID 1 **BREAKING** + 容器化运行时监管 + 安全 wave 3（symlink/`.env`/`/proc/*`/YOLO frozen/GHSA 二次合规/7 处凭据持久化）+ `hermes security audit` OSV.dev + CLI 冷启 -63% Bitwarden 磁盘 cache + TTS/STT plugin hook + `openai-api` 新 provider + CredentialPool 周配额轮换 + 子 Agent busy-mode 抗中断 + Mattermost 迁移 plugin + MCP OAuth 无头 paste-back + Codex TTFB watchdog + partial-stream `finish_reason=length` 续传 + Aux 主模型 fallback 统一 + Nous 401 指导 + `/resume` 编号 + `/q` 改 `/queue`）
 - [[2026-05-24-update]] — **84 commits daily delta**（安全 wave 2：17 webhook/dashboard/平台审批授权 + `register_auxiliary_task()` plugin API + 跨 Profile 软护栏 + Streaming 三连可见性 + ntfy 第 23 平台 + Kanban `promote` `--ids` + Skills `audit --deep` AST + Bitwarden EU）
 - [[2026-05-23-update]] — 49 commits daily delta（Nous Portal one-shot、Kanban DB 抗污染、Memory drift guard、审批沉默契约、TLS FD 三层防御、Plugin RCE 第二段、Telegram/WhatsApp/QQBot）
 - [[2026-05-22-update]] — 2,578 commits（v0.12.0 → v0.14.0）

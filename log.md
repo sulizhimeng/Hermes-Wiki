@@ -234,3 +234,29 @@
 - **README.md / index.md** badge & changelog 索引：26 → 27 changelogs，"最后更新" 2026-05-22 → 2026-05-23，跟踪 HEAD 标注为 `874c2b1`
 - 验证策略: 每条结论都至少一条 grep / Read 命中源码；功能描述对照对应 PR 标题 + commit body + 实际 hunk 内容
 
+## [2026-05-25] ingest | 跨日同步 hermes-agent 175 commits（`186bf25` → `b62af47`）
+- 输入: `git clone NousResearch/hermes-agent` @ `b62af47`（`2026-05-25 19:30 -0700`，msg "drop stale line-number reference in PRIORITY path comment"）
+- 范围: 自 wiki HEAD `9ea95c0` = hermes `186bf25` 起 175 个新 commit（90 `fix`、22 `test`、19 `chore`、18 `feat`、9 `docs`、3 `ci`、1 `perf`、1 `refactor`、1 `harden`），跨 2026-05-23 ~ 2026-05-25 三天，其中 79 commits 集中在 05-25
+- 新增 1 个 changelog 页面：
+  - changelog/2026-05-25-update.md（约 350 行）—— 主题：**Docker s6-overlay PID 1 BREAKING + 容器化运行时监管**、**安全 wave 3**（25 commits：symlink/`.env`/`/proc/*`/YOLO frozen/GHSA-rhgp-j443-p4rf 二次合规/凭据持久化 ×7）、**`hermes security audit` OSV.dev 一次性供应链扫描**（feat）、**CLI 冷启动 -63%**（Bitwarden 磁盘 L2 cache）、**`register_tts_provider()` / `register_transcription_provider()` plugin hook**（feat ×2）、**`openai-api` 新 Provider**（`/v1/models` 直拉 + gpt-5.5-pro）、**CredentialPool 周配额轮换正确性**（fix）、**Gateway 在飞子 Agent 抗 busy-mode 中断**（PR #30170）、**Mattermost 迁移为 bundled plugin**、**MCP OAuth 无头 paste-back 三连**、**Codex Responses-API TTFB watchdog + 上下文 token 估算修复**、**mid-tool-call partial-stream-stub 走 `finish_reason=length` 续传**、**Auxiliary 统一 main-model fallback**（PR #31845）、**Nous OAuth 401 actionable guidance**、**`/resume` 编号选择 + recap 调优键**、**`/q` 改属 `/queue`**
+- 源码已验证存在：
+  - `hermes_cli/security_audit.py` 576 行（`OSV_BATCH_URL` line 35，severity ord、Component dataclass）
+  - `hermes_cli/security_advisories.py` 451 行
+  - `agent/tts_registry.py` 133 行（`_BUILTIN_NAMES` = `{edge,elevenlabs,openai,minimax,xai,mistral,gemini,neutts,kittentts,piper}` line 48）
+  - `agent/transcription_registry.py` 122 行（`_BUILTIN_NAMES` = `{local,local_command,groq,openai,mistral,xai}` line 40）
+  - `hermes_cli/service_manager.py` 886 行（`ServiceManager(Protocol)` line 54、`S6ServiceManager` line 536、`_seed_supervise_skeleton` line 351-440 解决非特权 EACCES）
+  - `hermes_cli/container_boot.py` 218 行
+  - `plugins/platforms/mattermost/adapter.py` 1192 行（plugin.yaml + `register(ctx)` + 5-hook 模型）
+  - `tools/approval.py:29 _YOLO_MODE_FROZEN: bool = is_truthy_value(os.getenv("HERMES_YOLO_MODE", ""))`（模块导入时一次性求值，gates @ line 948 + 1089）
+  - `tools/tts_tool.py:339 BUILTIN_TTS_PROVIDERS`（与 registry 镜像）
+  - `tools/transcription_tools.py:226 BUILTIN_STT_PROVIDERS`
+  - `hermes_cli/providers.py:63 "openai-api": HermesOverlay(...)` + `hermes_cli/models.py:202,943,2245`
+  - `hermes_cli/main.py:6212-6215 cmd_security_audit` 注册
+  - `hermes_cli/plugins.py:645,683,785` PluginContext API（`register_tts_provider` / `register_transcription_provider` / `register_auxiliary_task`）
+  - `hermes_cli/config.py:1026 "resume_skip_tool_only": True`
+  - `docker/main-wrapper.sh` 30 行 + `docker/stage2-hook.sh` 142 行 + `docker/s6-rc.d/{main-hermes,dashboard,user}/`
+- 关键 commit 用 `git show <sha> --stat` + `head -50` 抽样核对：`e0e9c895d` (s6 BREAKING) / `2afefc501` (per-profile s6) / `7ab167736` (security audit, 943 行新增) / `0219b0408` (perf -63%) / `4117fc364` (cred-pool 周配额, 4 文件 189+/50-) / `99d62f6ba` (subagent interrupt protection) / `af973e407` (mattermost plugin, 1244 NEW) / `4cb3eb03c` (YOLO frozen) / `3ab7e2aa9` (GHSA filter) / `dbe5d8497` (universal main-model fallback) / `ac5359a3f` (partial-stream length) / `2d422720b` + `8601c4d44` (Codex Responses-API)
+- 测试增量约 +2200 行（security_audit 299 / container_boot 235 / profiles_s6_hooks 190 / container_restart 168 / gateway_s6_dispatch 117 / yolo+approval ~120 / Codex ~200 / 其它）
+- **README.md / index.md** badge & changelog 索引：28 → 29 changelogs，"最后更新" 2026-05-24 → 2026-05-25，跟踪 HEAD 标注 `186bf25` → `b62af47`
+- 验证策略: 每条结论都至少一条 `grep -n` / `Read` 命中源码；功能描述对照对应 PR 标题 + commit body + 实际 hunk 内容
+
