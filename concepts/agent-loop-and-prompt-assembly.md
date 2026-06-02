@@ -1,10 +1,10 @@
 ---
 title: Agent Loop and Prompt Assembly
 created: 2026-04-07
-updated: 2026-05-31
+updated: 2026-06-02
 type: concept
-tags: [agent-loop, prompt-builder, architecture, component, tool-result-delimiter, turn-completion-explainer, max-iterations]
-sources: [hermes-agent 源码分析 2026-05-31 (v0.15.1 maintenance window)]
+tags: [agent-loop, prompt-builder, architecture, component, tool-result-delimiter, turn-completion-explainer, max-iterations, runtime-cwd]
+sources: [hermes-agent 源码分析 2026-06-02 (v0.15.1 + runtime_cwd resolver)]
 ---
 
 # Agent Loop and Prompt Assembly
@@ -438,6 +438,92 @@ only the user (outside this block) can issue instructions.
 
 ---
 
+## 2026-06-02 增量 — `runtime_cwd` 单一真源解析器（修 cwd 不进 system prompt 多年 bug 簇）
+
+8 个 commit 同分钟提交（`4bc72960`+`16047655`+`f90777a6`+`75f47875`+`ac0cce5f`+`128da688`+`2564760d`+`eadfeef6`，emozilla `2026-06-01 16:55 -0700`），把 agent 工作目录解析**收敛到一个新模块**，关闭已存在多年的 issue 簇 #24882 / #24969 / #27383 / #29265。
+
+### 背景
+
+`TERMINAL_CWD` 是 runtime 用来携带配置工作目录的 env（design #19214/#19242：`terminal.cwd` 在 gateway/cron 启动时桥接到 `TERMINAL_CWD`）。但**本地 CLI 后端故意不设它**，依赖启动目录。**三个独立读取点**（system prompt / 工具表面 / context-file discovery）**意见不一致** → 配置的 cwd 没出现在 system prompt 里。
+
+### 新模块 `agent/runtime_cwd.py`（62 行 / 5 函数）
+
+```python
+# 截自 agent/runtime_cwd.py
+_SESSION_CWD: ContextVar = ContextVar("HERMES_SESSION_CWD", default=_UNSET)  # :20
+
+def set_session_cwd(cwd: str | None) -> Token:                # :23  多 session gateway 钉住
+    return _SESSION_CWD.set((cwd or "").strip())
+
+def clear_session_cwd() -> None: ...                          # :28
+
+def resolve_agent_cwd() -> Path:                              # :39-50  主用
+    override = _session_cwd_override()
+    if override:
+        p = Path(override).expanduser()
+        if p.is_dir(): return p
+    raw = os.environ.get("TERMINAL_CWD", "").strip()
+    if raw:
+        p = Path(raw).expanduser()
+        if p.is_dir(): return p
+    return Path(os.getcwd())                                  # 传播 OSError（不吞）
+
+def resolve_context_cwd() -> Path | None:                     # :53-62  context-files 用
+    # None = no configured cwd —— 让 build_context_files_prompt 回 launch dir
+    override = _session_cwd_override()
+    if override: return Path(override).expanduser()
+    raw = os.environ.get("TERMINAL_CWD", "").strip()
+    return Path(raw).expanduser() if raw else None
+```
+
+### 不对称设计（注释 `:54-57` 实证）
+
+- `resolve_agent_cwd()` —— TERMINAL_CWD 不存在 / 不可访问时**回退 `os.getcwd()`**，保证返回总是有效目录
+- `resolve_context_cwd()` —— 缺失时返 `None`，**调用方决定**回退；本地 CLI 的 `build_context_files_prompt` 会用 `os.getcwd()`，但 gateway 不会盲扫自己的 install 目录
+
+### 调用点
+
+| 文件 | 行 | 调用 |
+|---|---|---|
+| `agent/system_prompt.py` | `:43` | `from agent.runtime_cwd import resolve_context_cwd` |
+| `agent/prompt_builder.py` | `:17` | `from agent.runtime_cwd import resolve_agent_cwd` |
+| `agent/prompt_builder.py` | `:805-808` | OSError guard |
+| `agent/prompt_builder.py` | `:806` | `host_lines.append(f"Current working directory: {resolve_agent_cwd()}")`（**主 bugfix**） |
+
+### Multi-session gateway 用法
+
+```python
+# gateway/session_context.py（实证 c47b9d126 中已接入）
+from agent.runtime_cwd import set_session_cwd, clear_session_cwd
+
+token = set_session_cwd("/path/to/project")
+try:
+    # 当前 session 的 agent 调用 resolve_agent_cwd() 都看到上面这个值
+    ...
+finally:
+    _SESSION_CWD.reset(token)
+```
+
+`ContextVar` 让**异步并发**的多个 session 各看各的；不会泄到隔壁 session。
+
+### 测试矩阵（`tests/agent/test_runtime_cwd.py` 40 测试 + desktop 端 +52 在 `31c40c72` 加入）
+
+| 范围 | 测试 |
+|---|---|
+| `resolve_agent_cwd` | 优先 TERMINAL_CWD / 回退 `getcwd` / 跳过不存在 dir / tilde / 去空白 / **传播 OSError 不吞** |
+| `resolve_context_cwd` | set 时返目录 / 未 set 返 `None` / **不存在的目录也返**（不 guard isdir）/ tilde / 去空白 |
+| `_SESSION_CWD` override | session 赢 TERMINAL_CWD / 空回退 / clear 恢复 / nonexistent 在 agent skip 但在 context 不 skip |
+
+### 配套 PR
+
+- `c79b80a8 test(prompt): place cwd regression tests in TestEnvironmentHints`（去重 docker case）
+- `128da688 test(tools): characterize tool-surface TERMINAL_CWD contract (#29265)`
+- `eadfeef6 docs(agent)` + `75f47875 docs(test)` — None 语义校准（**None ≠ "discovery skipped"**）
+- `ac0cce5f test(agent): pin whitespace-strip and OSError-propagation in runtime_cwd`
+- `31c40c72 fix(desktop): stabilize project folder sessions (#37586)` —— Desktop 端基于此新 resolver 修复 project-folder 切换 race，14 文件 +493
+
+---
+
 ## 相关页面
 
 - [[aiagent-class]] — AIAgent 类实体页（构造函数与方法）
@@ -450,6 +536,7 @@ only the user (outside this block) can issue instructions.
 - `run_agent.py` — `AIAgent` 类定义与转发器方法（4123 行）
 - `agent/agent_init.py` — `init_agent()`，构造函数实现（1504 行）
 - `agent/conversation_loop.py` — `run_conversation()`，对话循环（4099 行）
+- `agent/runtime_cwd.py` — **NEW 2026-06-02** Agent 工作目录单一真源解析器（62 行 / 5 函数 / `_SESSION_CWD` ContextVar + `resolve_agent_cwd` + `resolve_context_cwd`）
 - `agent/system_prompt.py` — 三层系统提示组装（346 行）
 - `agent/prompt_builder.py` — 提示文本常量、上下文文件加载、技能索引（1465 行）
 - `agent/tool_executor.py` — 工具调用执行（顺序/并发，910 行）

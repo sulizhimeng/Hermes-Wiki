@@ -1,10 +1,10 @@
 ---
 title: Messaging Gateway Architecture
 created: 2026-04-07
-updated: 2026-05-31
+updated: 2026-06-02
 type: concept
-tags: [gateway, architecture, module, telegram, discord, messaging, qq, teams, line, simplex, ntfy, wecom, proxy, api-server, debounce, dm-topic]
-sources: [gateway/run.py, gateway/platforms/, gateway/platforms/api_server.py, gateway/delivery.py, gateway/platforms/telegram.py, plugins/platforms/, hermes_cli/config.py, gateway/platforms/wecom_callback.py]
+tags: [gateway, architecture, module, telegram, discord, messaging, qq, teams, line, simplex, ntfy, wecom, proxy, api-server, debounce, dm-topic, stream-event-protocol, per-platform-streaming]
+sources: [gateway/run.py, gateway/platforms/, gateway/platforms/api_server.py, gateway/delivery.py, gateway/platforms/telegram.py, gateway/stream_events.py, gateway/stream_dispatch.py, plugins/platforms/, hermes_cli/config.py, gateway/platforms/wecom_callback.py]
 ---
 
 # 消息网关架构
@@ -902,6 +902,159 @@ per-user thread 模式（`thread_sessions_per_user=True`）下，每个参与者
 
 ---
 
+## 2026-06-02 增量 — 结构化 stream-event 协议 + per-platform 默认值 + 媒体缓存原语
+
+### 结构化 stream-event 协议（#37250，`787936d1`）
+
+8 文件 **+740 / -29**。把流式表现的"内容"与"渲染"两层**正式解耦**：agent 端 emit typed events（发生了什么），adapter 端 render hooks（怎么投递）。**纯表现层**：什么都不持久化到对话历史 —— **不破 prompt cache / message-flow 不变量**。
+
+#### 新模块 `gateway/stream_events.py`（171 行 / 7 个 frozen dataclass）
+
+| 行 | 类 | 字段 |
+|---|---|---|
+| `:44` | `MessageChunk` | text |
+| `:56` | `MessageStop` | final: bool |
+| `:72` | `Commentary` | text（interim） |
+| `:85` | `ToolCallChunk` | tool_name / args / preview |
+| `:104` | `ToolCallFinished` | — |
+| `:122` | `LongToolHint` | — |
+| `:135` | `GatewayNotice` | — |
+
+#### 新模块 `gateway/stream_dispatch.py`（132 行）
+
+```python
+# 截自 :40-129
+class GatewayEventDispatcher:
+    def __init__(self, adapter, sink, enqueue_tool_line, tool_mode,
+                 preview_max_len, on_long_tool, on_notice): ...
+
+    def dispatch(self, event):                          # :88-129
+        if isinstance(event, MessageChunk):
+            self.adapter.render_message_event(event, self.sink)
+        elif isinstance(event, MessageStop):
+            self.adapter.render_message_event(event, self.sink)
+        elif isinstance(event, ToolCallChunk):
+            line = self.adapter.format_tool_event(
+                event, mode=self.tool_mode, preview_max_len=self.preview_max_len
+            )
+            if line is not None:                        # None = adapter 吃掉事件
+                self.enqueue_tool_line(line)
+        # ... mode 过滤 "all" / "new" / "verbose" / "off"
+```
+
+#### 三个新 hook（`gateway/platforms/base.py`）
+
+| 行 | 方法 | 默认行为 |
+|---|---|---|
+| `:1873` | `supports_draft_streaming()` | `False` —— adapter 主动覆盖才有 native draft（目前只 Telegram） |
+| `:1934` | `render_message_event(event, sink)` | MessageChunk → `on_delta`、MessageStop → `on_segment_break`、Commentary → `on_commentary` |
+| `:1955` | `format_tool_event(event, mode, preview_max_len)` | 返 emoji + tool name + args preview，或 `None` = **吃事件**（纯文本平台过滤 tool chrome） |
+
+#### Telegram MarkdownV2 对齐（`gateway/platforms/telegram.py`）
+
+```python
+# 截自 :2498-2542
+async def send_draft(self, chat_id, draft_id, content, metadata):
+    formatted = self.format_message(content)
+    try:
+        return await self._bot.send_message(
+            chat_id, formatted, parse_mode=ParseMode.MARKDOWN_V2,
+            ...
+        )
+    except BadRequest:                                  # MarkdownV2 解析失败
+        return await self._bot.send_message(            # 回退 plain text
+            chat_id, content, ...
+        )
+```
+
+—— **告别 draft 流式动画与最终 sendMessage 之间的"原始文本 → 富文本"跳变**。
+
+#### Config（`gateway/config.py`）
+
+`streaming.transport` 默认从空 → `"auto"`：`supports_draft_streaming() == True` 的 adapter 自动走 native draft，其他保持 edit 模式（**全局安全**）。
+
+#### 测试
+
+- `tests/gateway/test_stream_events.py` **+182**
+- `tests/gateway/test_telegram_send_draft_format.py` **+114**
+
+### Per-platform streaming 默认值（#37303，`195c4d2a`）
+
+`hermes_cli/config.py:1355-1368` —— 不再"一个全局开关搞定一切"，按平台特性挑默认：
+
+```python
+# 截自 :1365-1368
+"platforms": {
+    "telegram": {"streaming": True},      # 原生 sendMessageDraft 平滑 → 默认开
+    "discord":  {"streaming": False},     # 重复 editMessage 闪烁 → 默认关
+},
+```
+
+**Deep-merge 契约**（实证 `:1360-1364` 注释）：
+- 用户**显式**设置的 `display.platforms.discord.streaming: true` 胜默认
+- 全局 `streaming.enabled` master gate 仍然 `gate-all`
+- per-platform 标志只在 streaming 开后生效
+
+**不 bump `_config_version`** —— deep-merge 给老安装"填空"，**无需迁移**。
+
+**Dashboard 自动暴露 toggle**：web settings schema 由 `DEFAULT_CONFIG` 生成，所以 `display.platforms.telegram.streaming` / `.discord.streaming` 自动以 boolean toggle 暴露 —— 前端**零改动**。
+
+测试：`tests/hermes_cli/test_per_platform_streaming_defaults.py +65`。
+
+配套 `d78d77e4 feat(config): surface gateway streaming block in DEFAULT_CONFIG (#37285)` —— 同时把 gateway streaming 整块塞进 DEFAULT_CONFIG 让 dashboard 也能编辑。
+
+### 平台无关媒体缓存原语（`f768e75e` + `fa3b06b0`）
+
+`gateway/platforms/base.py:1313-1366 cache_media_bytes(data, filename, mime_type, default_kind)` —— **任何 adapter 复用**：
+
+```python
+# 截自 :1313-1366
+def cache_media_bytes(data, filename, mime_type, default_kind):
+    ext = _resolve_extension(filename, mime_type)
+    safe_name = _sanitize_filename(filename)
+    if is_image(ext): return cache_image(data, safe_name)
+    if is_video(ext): return cache_video(data, safe_name)
+    if is_audio(ext): return cache_audio(data, safe_name)
+    return cache_document(data, safe_name, kind=default_kind)
+    # 返 CachedMedia 含 sandbox-translated agent-visible 路径
+    # （to_agent_visible_cache_path 防带空格路径泄）
+```
+
+**Telegram 接进去**（`gateway/platforms/telegram.py`）：observed-group 路径 size-gate → download → `cache_media_bytes()` → annotate；`_media_message_type()` 辅助合并 addressed-media 类型阶梯。
+
+**收益**：任何 adapter（Discord/Slack/Signal/…）能直接复用，**写一份兜底全平台**。
+
+### Extract-stripped 工具响应恢复 + final-delivery 收敛（#29346，`a1f76ba7` + `8bf498c2`）
+
+| 行 | 改动 |
+|---|---|
+| `:1748-1761 _strip_media_directives(text)` | 新 helper，剥 `[[audio_as_voice]]` / `[[as_document]]` / `MEDIA:<path>` |
+| `:4082-4083 _response_pre_extract = response` | **快照**在 extract_media/extract_images/extract_local_files 之前 |
+| `:4114-4126` | extraction 后**文本空 + 无附件** → 从 post-`extract_media` body 恢复（MEDIA 已剥空格路径） |
+| `:4120-4125 response_delivery_recovered` | WARNING 含 pre-extract size + 目标 chat_id |
+| `:4179-4200` | 文本存在 + 非 `_tts_caption_delivered` → 发；标 final 响应为通知投递 |
+| `:4333 response_delivery_dropped` | **ERROR**：响应非空但啥也没发 —— 大声守不变量 |
+
+测试 `tests/gateway/test_tool_response_drop_recovery.py +258`。
+
+### Weixin `asyncio.wait_for` 替 aiohttp ClientTimeout（`56666901` + `765790a2`）
+
+`gateway/platforms/weixin.py:370-414` —— `_api_post` / `_api_get` 改用 `asyncio.wait_for(_do(), timeout=timeout_ms/1000)`，修 cron `run_coroutine_threadsafe()` 上下文里 aiohttp 找不到 running task 的 `"context manager should be used inside a task"` 错。`:405-407` 注释钉死场景。`_get_updates()` + `_do_upload/_download()` 已是 `wait_for` 模式现统一。
+
+测试 `tests/gateway/test_weixin.py +145`。
+
+### Gateway 杂项
+
+- `f7a3509b fix(gateway): honor WECOM_ALLOWED_USERS in env-only WeCom DM allowlist` —— `wecom.py:165-171` 加 `os.getenv("WECOM_ALLOWED_USERS", "")` 回落分支
+- `0cd5867b fix(whatsapp): honor dm_policy and group_policy open at the gateway`
+- `eee32cdd fix(gateway): fall back to in-process heartbeat when s6 sleep is missing (#36208)` —— `hermes_cli/gateway.py +59` + `tests/hermes_cli/test_gateway_s6_dispatch.py +143 / -34`
+- `b14e15c48 fix(gateway): clean service restart notifications` —— 9 文件 **+378 / -34**（`gateway/run.py +198` + `gateway/platforms/telegram.py +6` + 2 新测试）
+- `05022066 feat(bluebubbles): support group mention gating` —— `gateway/config.py +16` + `gateway/platforms/bluebubbles.py +97` + 132 测试
+
+详见 [[2026-06-02-update#5-gateway-结构化-stream-event-协议]] / [[2026-06-02-update#6-per-platform-streaming-默认值]] / [[2026-06-02-update#16-telegram-observed-media--reusable-primitive]] / [[2026-06-02-update#17-gateway-extract-strip-recover]]。
+
+---
+
 ## 相关页面
 
 - [[gateway-session-management]] — 网关会话管理架构
@@ -914,7 +1067,9 @@ per-user thread 模式（`thread_sessions_per_user=True`）下，每个参与者
 
 - `gateway/run.py` — 主循环和消息分发
 - `gateway/session.py` — SessionStore
-- `gateway/platforms/base.py` — 平台基类（`extract_local_files`、`SUPPORTED_DOCUMENT_TYPES`、`send_document`）
+- `gateway/platforms/base.py` — 平台基类（`extract_local_files`、`SUPPORTED_DOCUMENT_TYPES`、`send_document`、**NEW 2026-06-02** `cache_media_bytes` 平台无关媒体缓存原语 + `supports_draft_streaming`/`render_message_event`/`format_tool_event` 三个 stream-event 渲染 hook）
+- `gateway/stream_events.py` — **NEW 2026-06-02** 7 个 frozen dataclass（MessageChunk/MessageStop/Commentary/ToolCallChunk/ToolCallFinished/LongToolHint/GatewayNotice），171 行
+- `gateway/stream_dispatch.py` — **NEW 2026-06-02** `GatewayEventDispatcher` 把 typed events 路由到 adapter render hooks，132 行
 - `gateway/delivery.py` — 消息投递（含 2026-05-26 `_looks_like_telegram_private_chat_id` DM topic 直发分支）
 - `gateway/config.py` — 网关配置
 - `gateway/platforms/` — 平台适配器目录

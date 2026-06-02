@@ -1,10 +1,10 @@
 ---
 title: CLI 架构与终端交互设计
 created: 2026-04-07
-updated: 2026-06-01
+updated: 2026-06-02
 type: concept
-tags: [architecture, cli, terminal, ux, tui, ink, setup, prompt-size, partial-compress, undo-rewind, desktop-cli]
-sources: [cli.py, hermes_cli/, ui-tui/, tui_gateway/, hermes_cli/partial_compress.py, hermes_cli/prompt_size.py, hermes_cli/mcp_startup.py, apps/desktop/, hermes_state.py]
+tags: [architecture, cli, terminal, ux, tui, ink, setup, prompt-size, partial-compress, undo-rewind, desktop-cli, fuzzy-picker, unified-sessions-overlay]
+sources: [cli.py, hermes_cli/, ui-tui/, tui_gateway/, hermes_cli/partial_compress.py, hermes_cli/prompt_size.py, hermes_cli/mcp_startup.py, apps/desktop/, hermes_state.py, ui-tui/src/lib/fuzzy.ts, web/src/lib/fuzzy.ts, ui-tui/src/components/activeSessionSwitcher.tsx]
 ---
 
 > **v2026.4.30 ~ v2026.5.7 增量**：
@@ -642,6 +642,93 @@ TUI 端走 `tui_gateway/server.py` 的 command.dispatch undo 分支（`243e836dc
 
 ---
 
+## 2026-06-02 增量 — 模糊模型选择器 + 统一 Sessions 浮层 + TUI 退出复位 + 状态栏 wave
+
+### 模糊模型选择器（WebUI + TUI 共用算法）
+
+3 commit（`7527e7ae feat: fuzzy search for the model picker (WebUI + TUI)` + `53f598e7 feat(cli): add fuzzy search helpers for curses pickers` + `0fdab53e feat(cli): ranked fuzzy search in the curses model picker`），5 文件 **+696 / -55**。
+
+#### 新模块
+
+| 文件 | 行 | 说明 |
+|---|---|---|
+| `web/src/lib/fuzzy.ts` | **192** | 算法主体（WebUI） |
+| `ui-tui/src/lib/fuzzy.ts` | **177** | 镜像（TUI/curses 包） |
+| `ui-tui/src/lib/fuzzy.test.ts` | **109** | 15 测试 |
+
+#### 评分契约（截自 `web/src/lib/fuzzy.ts:53-119 fuzzyScore(target, query)`）
+
+| 规则 | 分值 |
+|---|---|
+| exact match | +20 |
+| prefix match | +8 |
+| word-boundary match（`-` / `_` / `/` 后） | +3 |
+| contiguous run | +5 |
+| first char hit | +5 |
+| gap penalty | -3（上限） |
+
+不是 subsequence 返 `null`。
+
+#### Multi-token AND（`:126-157 fuzzyScoreMulti`）
+
+空白分割后全部必须命中 —— 查询 `clad snnt` 命中 `claude-sonnet`、`g4o` 命中 `gpt-4o`。
+
+#### 泛型 ranker（`:168-192 fuzzyRank<T>(items, query, toText)`）
+
+返 `RankedItem[]`（按 score desc），带 matched positions 数组给 `<mark>` 高亮。
+
+#### 集成
+
+- **WebUI**（`web/src/components/ModelPickerDialog.tsx:12,160-165,171-178`）—— provider rank（拼 name+slug+model list）+ model rank + `<mark>` 高亮
+- **TUI**（`ui-tui/src/components/modelPicker.tsx +197 行`）—— provider stage + model stage 双过滤，type-to-filter，Backspace 编辑，Ctrl+U 清空，Esc 在非空 filter 时只清不返
+
+### 统一 Sessions 浮层 + `/model` 单一命名（TUI #37112，`fabca0bd`）
+
+17 文件 **+480 / -347**。**两件事一起做**：
+
+1. **`/provider` 别名废止**：
+   - `hermes_cli/commands.py:126 CommandDef("model", ...)` 仍存
+   - `apps/desktop/src/lib/desktop-slash-commands.ts` 同步从 PICKER_OWNED_COMMANDS 删 `/provider`
+   - `tests/test_tui_gateway_server.py` 翻转断言：从 "provider alias exists" → "provider alias gone"
+
+2. **`/resume` 冷启浏览器 + `/sessions` 实时切换器合一**（`ui-tui/src/components/activeSessionSwitcher.tsx 394 行`）：
+
+| 行 | 元素 |
+|---|---|
+| `:60-66` | `sessionRowKindAt(index, liveCount)` → `'new'`（顶部）/ `'live'`（接下来 liveCount 行）/ `'history'`（剩余） |
+| `:68-84` | `relativeSessionAge(ts)` → `today` / `yesterday` / `{days}d ago` |
+| `:87-89` | `resumableHistory(history, live)` —— 按 **id** 去重已 live 的；关闭后会重新出现在 history |
+
+**armed-delete 跟 session id 而非 row index** —— 1.5s 实时状态轮询的**重排序**不会让删除操作错对象（关键鲁棒性修）。
+
+命令路由（`ui-tui/src/app/slash/commands/session.ts:99-122`）：
+
+| 形态 | 行为 | Busy guard |
+|---|---|---|
+| 无参 `/resume` / `/sessions` / `/session` / `/switch` | 打开浮层 | ✗ |
+| `/resume <id\|title>` / `/sessions <id>` | 立即 resume cold session | ✓（`guardBusySessionSwitch`） |
+| `/resume new` / `/sessions new` | 创建 live session 后台 | ✗ |
+
+切换 live ↔ live **不 guard**（允许并发）。
+
+### TUI 退出复位终端模式（`038ed94a fix(cli): reset terminal input modes on TUI exit to stop focus/mouse leaks`）
+
+退出 TUI 时把 focus / mouse tracking 模式复位（之前 `DECSET ?1004` 等开关在退出时没回滚 → 退出后 shell 收到 escape sequence 干扰）。Merge `a6b6afdf`。
+
+### Status bar 10 连改进
+
+`2f171743` / `e59b815c` / `899e8b90` / `1d7a1c00` / `13a2350c` / `9cb7d40d` / `e25b2a6e` / `7d51cd75 (merge)` —— 窄屏下 status/model 优先于 cwd；busy reservation 按 `/indicator-style` 感知宽度；`FaceTicker` 与 reservation 一致；`fmtCwdBranch` 默认行为保留，cwd 切短在状态栏 call site；busy/duration reservation 由 `fmtDuration` 派生。
+
+### CLI 多模态消息 prepend 安全化
+
+- `043350df fix(cli): prepend queued notes safely to multimodal messages` —— `_prepend_note_to_message()` 不再破坏 multimodal content block
+- `c35ede78 refactor(cli): normalize note and avoid blank lines in prepend helper`
+- `a26a12ad test(cli): cover _prepend_note_to_message str/list handling`
+
+详见 [[2026-06-02-update#7-tui-单一-model--统一-sessions-浮层]] / [[2026-06-02-update#9-model-picker-模糊搜索]] / [[2026-06-02-update#25-tui-状态栏-wave]] / [[2026-06-02-update#27-cli-memory-小修]]。
+
+---
+
 ## 相关文件
 
 - `cli.py` — 经典 CLI 主类（660KB；大单体文件）
@@ -660,6 +747,9 @@ TUI 端走 `tui_gateway/server.py` 的 command.dispatch undo 分支（`243e836dc
 - `apps/bootstrap-installer/` — Tauri Windows 安装器（bundle Python+Git 免管理员）
 - `hermes_state.py:288,2426,2513,2537` — `messages.active` 软删 + rewind primitives（2026-06-01+）
 - `cli.py:7106 undo_last(n, prefill)` — `/undo [N]` 实装（2026-06-01+）
+- `web/src/lib/fuzzy.ts` / `ui-tui/src/lib/fuzzy.ts` — **NEW 2026-06-02** 模糊评分匹配（192/177 行 + 15 测试，WebUI + TUI 共用算法）
+- `ui-tui/src/components/activeSessionSwitcher.tsx` — **NEW 2026-06-02** 统一 Sessions 浮层（394 行，合 `/resume` + `/sessions`）
+- `agent/runtime_cwd.py` — **NEW 2026-06-02** Agent 工作目录单一真源（影响 system_prompt + prompt_builder + 跨 session ContextVar）
 - `agent/portal_tags.py` — Portal 请求标签集中点（`product=hermes-agent` + `client=hermes-client-v<ver>`）
 - `hermes_cli/dump.py` — `hermes dump` 环境摘要（纯文本，用于调试/提 issue）
 - `agent/display.py` — 显示系统

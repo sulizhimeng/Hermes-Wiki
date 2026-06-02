@@ -1,9 +1,9 @@
 ---
 title: Dashboard OAuth 鉴权闸门（v0.14 增量）
 created: 2026-05-27
-updated: 2026-06-01
+updated: 2026-06-02
 type: concept
-tags: [architecture, security, dashboard-auth, oauth, plugins, extensibility]
+tags: [architecture, security, dashboard-auth, oauth, plugins, extensibility, refresh-token]
 sources:
   - hermes_cli/dashboard_auth/base.py
   - hermes_cli/dashboard_auth/registry.py
@@ -347,6 +347,80 @@ def register_dashboard_auth_provider(self, provider) -> None:
 
 ---
 
+## 2026-06-02 增量 — Refresh-token cookie 轮转（#37247，`c10ccaaf`）
+
+`feat(dashboard-auth): rotate dashboard sessions via refresh token (#37247)` —— 4 文件 +428 / -55。修复**浏览器在 `Max-Age` 后驱逐 access-token cookie**（refresh token cookie 还在）的硬 401 误判：之前 middleware 把这视为"未认证"强制完整重登；现在能用 RT 静默续期 AT。
+
+### 缘起（commit body 实证）
+
+老路径里 `_attempt_refresh` **只在 AT 存在但失效**时触发（即调 token-introspection 失败时）。但浏览器场景下 AT 在 Max-Age 后**直接消失**，根本没有 token 走到 introspection —— gate 看到无 cookie 就强制清掉 RT、跳 OAuth 重登。**手动 Refresh button 路径**和老回归测试都恰好让 AT 保持存在，所以这个失败模式逃过审查。
+
+### Provider 端（`plugins/dashboard_auth/nous/__init__.py`）
+
+| 行 | 改动 |
+|---|---|
+| `:244-302` | 新方法 `refresh_session(refresh_token)` — POST `grant_type=refresh_token` 到 Portal `/token` |
+| `:263-266` | 空 RT **fast-fail** 不联网 `RefreshExpiredError` |
+| `:269-291` | RT 在 body（Portal schema 要）**和** `x-nous-refresh-token` header（log redaction）同发 |
+| `:298-302` | `400` → `RefreshExpiredError`（过期/吊销/重放检测）；网络错 → `ProviderError` |
+| `:304-326` | 共享 `_token_response_to_session()` 处理器 — **参数化 exception 类型**（auth-code 用 `InvalidCodeError`，refresh 用 `RefreshExpiredError`） |
+| `:207-242` | `complete_login()` 改为捕获 Portal 初次返回的 RT（**前向兼容**：缺失时存为空串） |
+
+### Middleware 端（`hermes_cli/dashboard_auth/middleware.py`）
+
+| 行 | 改动 |
+|---|---|
+| `:236` | `refreshed = _attempt_refresh(request, refresh_token=_rt)` —— **AT 缺席 + RT 存在**也走刷新路径 |
+| `:255` | 成功后 `refresh_token=new_session.refresh_token` 写回新 cookie（**轮转**，旧 RT 失效） |
+| `:302` | 新函数签名 `def _attempt_refresh(request, *, refresh_token)`（仅接关键字参数，避免误位置） |
+
+**关键决策**（不变量）：
+- 只有 **AT 和 RT 都缺**才硬 bounce（401，让前端跳 OAuth）
+- 单独存在的 RT → 走 refresh，**省略 AT verification**（无 AT 可验）
+- 死/过期 RT → `RefreshExpiredError` → fall through 到 clear-and-relogin
+
+### 与 OAuth 一致的 `_token_response_to_session` 处理器（`:304-326`）
+
+```python
+# 形态（参数化 exception type）
+def _token_response_to_session(response, expired_error_cls):
+    if response.status_code == 400:
+        raise expired_error_cls(...)  # InvalidCodeError 或 RefreshExpiredError
+    if not response.is_success:
+        raise ProviderError(...)
+    return Session(
+        access_token=..., refresh_token=...,  # 都可空
+        ...
+    )
+```
+
+—— 让 `complete_login()`（auth_code → InvalidCodeError）和 `refresh_session()`（RT → RefreshExpiredError）走同一段，**省 50+ 行重复**。
+
+### Cookie 体系（`hermes_cli/dashboard_auth/cookies.py`）
+
+兼容性钩子（实证）：
+- `:43` 注释 — `set_session_cookies` 接受 `refresh_token=""`（contract-v1 形态，provider 没返 RT）
+- `:119,129-131` 函数签名 + 行为 — 空 RT 表示 "provider 不发 RT，不要 set RT cookie"
+- `:148-151` if `refresh_token`: → `cookies.set("refresh_token", refresh_token, ...)` —— 空串走 else 分支不 set
+
+### 测试矩阵
+
+- `tests/hermes_cli/test_dashboard_auth_401_reauth.py` **+89** — **3 个关键回归**：
+  - `AT_evicted + RT_present` → 透明 refresh + 写新 cookie（200，不见 401）
+  - `no_cookies` → 仍然 401 跳重登
+  - `RT_only + dead_RT` → **clean 401**，不见 500（早 fail）
+- `tests/plugins/dashboard_auth/test_nous_provider.py` **+113** —— RT 路径单元测试 + token-response 形态测试
+
+### 影响范围
+
+- **不动 OAuth 流**：初始 auth_code → token 交换路径完全没改，新 hook 只在 RT 已经存在时触发
+- **不动 cookie schema**：RT cookie 已经存在了一段时间，本次只是 middleware 终于学会**用**它
+- **不动 Provider ABC**：`refresh_session` 是 `base.py:119` 已声明的 abstract 方法（详见 §4），Nous Provider 终于补上 concrete 实现
+
+详见 [[2026-06-02-update#4-dashboard-auth-refresh-token-轮转]]。
+
+---
+
 ## 相关页面
 
 - [[security-defense-system]] — 多层防御整体框架，dashboard OAuth 是 v0.14-late 新增的 layer
@@ -355,3 +429,4 @@ def register_dashboard_auth_provider(self, provider) -> None:
 - [[cli-architecture]] — `hermes dashboard` 子命令是闸门的入口
 - [[2026-05-27-update]] — 落地 changelog
 - [[2026-06-01-update]] — Dashboard 全管理面板（17 个新端点复用闸门）
+- [[2026-06-02-update]] — Channels 页 + Admin Panel v2 + Refresh-token 轮转
